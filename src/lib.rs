@@ -14,7 +14,22 @@ pub mod tools;
 pub mod tool_mapper;
 pub mod runtime;
 pub mod traits;
+pub mod interceptor;
+pub mod baml_collector;
+pub mod baml_pre_execution;
+
+pub mod interceptors;
+pub mod builder;
 
 pub use error::{BamlRtError, Result};
 pub use runtime::{Runtime, RuntimeBuilder, RuntimeConfig, QuickJSConfig};
+pub use interceptor::{
+    InterceptorRegistry, InterceptorDecision, LLMInterceptor, ToolInterceptor,
+    LLMCallContext, ToolCallContext,
+};
+pub use interceptors::{
+    TracingInterceptor, TracingLLMInterceptor, TracingToolInterceptor,
+};
+pub use quickjs_bridge::QuickJSBridge;
+pub use context::{BamlContext, ContextMetadata};
 

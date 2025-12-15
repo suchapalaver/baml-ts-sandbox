@@ -5,12 +5,16 @@
 
 use crate::error::{BamlRtError, Result};
 use crate::tools::ToolRegistry;
+use crate::interceptor::{InterceptorRegistry, LLMCallContext, InterceptorDecision};
+use crate::baml_collector::BamlLLMCollector;
+use crate::baml_pre_execution::{extract_context_from_http_request, intercept_llm_call_pre_execution};
 use baml_runtime::{BamlRuntime, FunctionResultStream, RuntimeContextManager};
 use baml_types::BamlValue;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 
 /// BAML execution engine that executes BAML IL
@@ -26,7 +30,6 @@ impl BamlExecutor {
     /// 
     /// This loads the BAML runtime from the baml_src directory using from_directory
     pub fn load_il(
-        _baml_client_dir: &Path,
         baml_src_dir: &Path,
         tool_registry: Arc<Mutex<ToolRegistry>>,
     ) -> Result<Self> {
@@ -61,8 +64,11 @@ impl BamlExecutor {
             None, // baml_src_reader
         );
         
-        // Function discovery will be done from the runtime's IR when needed
-        let function_map = HashMap::new();
+        // Populate function map from runtime
+        let function_map: HashMap<String, String> = runtime
+            .function_names()
+            .map(|name| (name.to_string(), name.to_string()))
+            .collect();
         
         Ok(Self {
             runtime: Arc::new(runtime),
@@ -78,6 +84,7 @@ impl BamlExecutor {
         function_name: &str,
         args: Value,
         tool_registry: Option<Arc<Mutex<ToolRegistry>>>,
+        interceptor_registry: Option<Arc<Mutex<InterceptorRegistry>>>,
     ) -> Result<Value> {
         tracing::debug!(
             function = function_name,
@@ -102,16 +109,66 @@ impl BamlExecutor {
         let tags = None;
         let cancel_tripwire = baml_runtime::TripWire::new(None);
         
+        // Track execution start time for LLM interceptor callbacks
+        let start_time = Instant::now();
+        
+        // Create collector for LLM interception if registry is provided
+        let collector: Option<BamlLLMCollector> = if let Some(registry) = &interceptor_registry {
+            Some(BamlLLMCollector::new(
+                registry.clone(),
+                function_name.to_string(),
+            ))
+        } else {
+            None
+        };
+        
         // TODO: Integrate tool registry with BAML's function calling mechanism
         // For now, tools are registered but not passed to the LLM
         // This requires understanding BAML's native tool calling support
-        let (result, _call_id) = self.runtime.call_function(
+        
+        // Pre-execution interception: intercept LLM calls before they're sent
+        if let Some(ref registry) = interceptor_registry {
+            match intercept_llm_call_pre_execution(
+                &self.runtime,
+                function_name,
+                &params,
+                &self.ctx_manager,
+                registry,
+                env_vars.clone(),
+                false, // stream = false for regular calls
+            ).await {
+                Ok(InterceptorDecision::Allow) => {
+                    // Allow the call to proceed
+                }
+                Ok(InterceptorDecision::Block(msg)) => {
+                    // Block the call - return error
+                    return Err(BamlRtError::BamlRuntime(format!(
+                        "LLM call blocked by interceptor: {}", msg
+                    )));
+                }
+                Err(e) => {
+                    // Interceptor error - return it
+                    return Err(e);
+                }
+            }
+        }
+        
+        // Wire up the collector to track function execution
+        // Note: We track the function call by passing the collector, but we also need
+        // to manually track the call_id so we can process trace events later
+        let collectors = if let Some(ref collector) = collector {
+            Some(vec![collector.as_collector()])
+        } else {
+            None
+        };
+        
+        let (result, call_id) = self.runtime.call_function(
             function_name.to_string(),
             &params,
             &self.ctx_manager,
             None, // type_builder
             None, // client_registry
-            None, // collectors
+            collectors, // collectors - now wired up to track execution
             env_vars,
             tags,
             cancel_tripwire,
@@ -132,6 +189,16 @@ impl BamlExecutor {
         // Convert ResponseBamlValue to JSON using serialize_partial
         let json_value = serde_json::to_value(parsed.serialize_partial())
             .map_err(BamlRtError::Json)?;
+        
+        // Process trace events to notify LLM interceptors of completion
+        // This extracts LLM call information from BAML's trace events
+        if let Some(ref collector) = collector {
+            // Process trace events to extract LLM call context and notify interceptors
+            // The collector tracks the function call via the collector we passed to call_function
+            if let Err(e) = collector.process_trace_events().await {
+                tracing::warn!("Failed to process trace events for LLM interception: {}", e);
+            }
+        }
         
         Ok(json_value)
     }
@@ -186,6 +253,11 @@ impl BamlExecutor {
     /// Get a reference to the context manager (needed for streaming)
     pub fn ctx_manager(&self) -> &RuntimeContextManager {
         &self.ctx_manager
+    }
+
+    /// List all available function names from the loaded BAML runtime
+    pub fn list_functions(&self) -> Vec<String> {
+        self.runtime.function_names().map(|s| s.to_string()).collect()
     }
     
     /// Convert JSON Value to BamlMap<String, BamlValue>

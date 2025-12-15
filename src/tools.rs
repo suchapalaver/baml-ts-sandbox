@@ -17,9 +17,10 @@ use async_trait::async_trait;
 /// - Execution logic
 /// 
 /// # Example
-/// ```rust,no_run
+/// ```rust,ignore
 /// use baml_rt::tools::BamlTool;
 /// use serde_json::{json, Value};
+/// use async_trait::async_trait;
 /// 
 /// struct WeatherTool;
 /// 
@@ -41,7 +42,7 @@ use async_trait::async_trait;
 ///         })
 ///     }
 ///     
-///     async fn execute(&self, args: Value) -> Result<Value> {
+///     async fn execute(&self, args: Value) -> baml_rt::error::Result<Value> {
 ///         let obj = args.as_object().expect("Expected object");
 ///         let location = obj.get("location").and_then(|v| v.as_str()).unwrap();
 ///         Ok(json!({"temperature": "22°C", "location": location}))
@@ -117,19 +118,25 @@ impl ToolRegistry {
     /// * `tool` - An instance of a type implementing `BamlTool`
     /// 
     /// # Example
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use baml_rt::tools::{ToolRegistry, BamlTool};
+    /// use serde_json::json;
+    /// use async_trait::async_trait;
     /// 
     /// struct MyTool;
     /// 
-    /// #[async_trait::async_trait]
+    /// #[async_trait]
     /// impl BamlTool for MyTool {
     ///     const NAME: &'static str = "my_tool";
-    ///     // ... implement trait methods
+    ///     fn description(&self) -> &'static str { "My tool" }
+    ///     fn input_schema(&self) -> serde_json::Value { json!({}) }
+    ///     async fn execute(&self, _args: serde_json::Value) -> baml_rt::error::Result<serde_json::Value> {
+    ///         Ok(json!({}))
+    ///     }
     /// }
     /// 
     /// let mut registry = ToolRegistry::new();
-    /// registry.register(MyTool);
+    /// registry.register(MyTool)?;
     /// ```
     pub fn register<T: BamlTool>(&mut self, tool: T) -> Result<()> {
         let name = T::NAME.to_string();

@@ -19,7 +19,7 @@ async fn main() -> anyhow::Result<()> {
     let baml_manager = Arc::new(Mutex::new(BamlRuntimeManager::new()?));
 
     // Initialize QuickJS bridge
-    let _bridge = QuickJSBridge::new(baml_manager.clone())?;
+    let _bridge = QuickJSBridge::new(baml_manager.clone()).await?;
 
     tracing::info!("BAML Runtime initialized");
 

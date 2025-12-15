@@ -1,0 +1,20 @@
+# Docker ignore file for agent builds
+node_modules
+dist
+*.log
+*.map
+.git
+.gitignore
+.env
+.env.local
+coverage
+.nyc_output
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode
+.idea
+target
+Cargo.lock
+

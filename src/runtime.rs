@@ -5,6 +5,7 @@
 use crate::baml::BamlRuntimeManager;
 use crate::error::{BamlRtError, Result};
 use crate::quickjs_bridge::QuickJSBridge;
+use crate::interceptor::{InterceptorPipeline, LLMInterceptor, ToolInterceptor};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -73,7 +74,6 @@ impl QuickJSConfig {
 }
 
 /// Configuration for the BAML runtime environment
-#[derive(Debug, Clone)]
 pub struct RuntimeConfig {
     /// Path to the BAML schema directory
     pub schema_path: Option<PathBuf>,
@@ -86,6 +86,12 @@ pub struct RuntimeConfig {
     
     /// Additional environment variables to pass to BAML runtime
     pub env_vars: Vec<(String, String)>,
+    
+    /// LLM interceptor pipeline
+    pub llm_interceptor_pipeline: Option<InterceptorPipeline<dyn LLMInterceptor>>,
+    
+    /// Tool interceptor pipeline
+    pub tool_interceptor_pipeline: Option<InterceptorPipeline<dyn ToolInterceptor>>,
 }
 
 impl Default for RuntimeConfig {
@@ -95,6 +101,8 @@ impl Default for RuntimeConfig {
             enable_quickjs: false,
             quickjs_config: QuickJSConfig::default(),
             env_vars: Vec::new(),
+            llm_interceptor_pipeline: None,
+            tool_interceptor_pipeline: None,
         }
     }
 }
@@ -195,10 +203,11 @@ impl RuntimeBuilder {
     /// including memory limits, stack size, and garbage collection settings.
     /// 
     /// # Example
-    /// ```rust,no_run
+    /// ```rust,ignore
     /// use baml_rt::{RuntimeBuilder, QuickJSConfig};
     /// use std::time::Duration;
     /// 
+    /// # tokio_test::block_on(async {
     /// let runtime = RuntimeBuilder::new()
     ///     .with_quickjs(true)
     ///     .with_quickjs_config(
@@ -209,6 +218,8 @@ impl RuntimeBuilder {
     ///     )
     ///     .build()
     ///     .await?;
+    /// # Ok::<(), baml_rt::error::BamlRtError>(())
+    /// # })
     /// ```
     pub fn with_quickjs_config(mut self, config: QuickJSConfig) -> Self {
         self.config.quickjs_config = config;
@@ -221,8 +232,74 @@ impl RuntimeBuilder {
         self
     }
 
+    /// Add an LLM interceptor to the pipeline
+    /// 
+    /// This allows composing interceptors in a pipeline pattern.
+    pub fn with_llm_interceptor<I: LLMInterceptor>(mut self, interceptor: I) -> Self {
+        let pipeline = self.config.llm_interceptor_pipeline
+            .take()
+            .unwrap_or_else(|| InterceptorPipeline::new());
+        self.config.llm_interceptor_pipeline = Some(pipeline.add(Arc::new(interceptor) as Arc<dyn LLMInterceptor>));
+        self
+    }
+
+    /// Add multiple LLM interceptors to the pipeline
+    pub fn with_llm_interceptors<I: LLMInterceptor>(mut self, interceptors: Vec<I>) -> Self {
+        let mut pipeline = self.config.llm_interceptor_pipeline
+            .take()
+            .unwrap_or_else(|| InterceptorPipeline::new());
+        
+        for interceptor in interceptors {
+            pipeline = pipeline.add(Arc::new(interceptor) as Arc<dyn LLMInterceptor>);
+        }
+        
+        self.config.llm_interceptor_pipeline = Some(pipeline);
+        self
+    }
+
+    /// Set the LLM interceptor pipeline
+    /// 
+    /// This replaces any existing LLM interceptor pipeline.
+    pub fn with_llm_interceptor_pipeline(mut self, pipeline: InterceptorPipeline<dyn LLMInterceptor>) -> Self {
+        self.config.llm_interceptor_pipeline = Some(pipeline);
+        self
+    }
+
+    /// Add a tool interceptor to the pipeline
+    /// 
+    /// This allows composing interceptors in a pipeline pattern.
+    pub fn with_tool_interceptor<I: ToolInterceptor>(mut self, interceptor: I) -> Self {
+        let pipeline = self.config.tool_interceptor_pipeline
+            .take()
+            .unwrap_or_else(|| InterceptorPipeline::new());
+        self.config.tool_interceptor_pipeline = Some(pipeline.add(Arc::new(interceptor) as Arc<dyn ToolInterceptor>));
+        self
+    }
+
+    /// Add multiple tool interceptors to the pipeline
+    pub fn with_tool_interceptors<I: ToolInterceptor>(mut self, interceptors: Vec<I>) -> Self {
+        let mut pipeline = self.config.tool_interceptor_pipeline
+            .take()
+            .unwrap_or_else(|| InterceptorPipeline::new());
+        
+        for interceptor in interceptors {
+            pipeline = pipeline.add(Arc::new(interceptor) as Arc<dyn ToolInterceptor>);
+        }
+        
+        self.config.tool_interceptor_pipeline = Some(pipeline);
+        self
+    }
+
+    /// Set the tool interceptor pipeline
+    /// 
+    /// This replaces any existing tool interceptor pipeline.
+    pub fn with_tool_interceptor_pipeline(mut self, pipeline: InterceptorPipeline<dyn ToolInterceptor>) -> Self {
+        self.config.tool_interceptor_pipeline = Some(pipeline);
+        self
+    }
+
     /// Build the runtime environment
-    pub async fn build(self) -> Result<Runtime> {
+    pub async fn build(mut self) -> Result<Runtime> {
         tracing::info!("Building runtime environment");
 
         // Create BAML runtime manager
@@ -238,14 +315,57 @@ impl RuntimeBuilder {
             baml_manager.load_schema(schema_path_str)?;
         }
 
+        // Extract pipelines before moving config
+        let llm_pipeline = std::mem::replace(&mut self.config.llm_interceptor_pipeline, None);
+        let tool_pipeline = std::mem::replace(&mut self.config.tool_interceptor_pipeline, None);
+        
+        // Inject LLM interceptor pipeline if provided
+        if let Some(llm_pipeline) = llm_pipeline {
+            let registry = baml_manager.interceptor_registry();
+            let mut registry_guard = registry.lock().await;
+            // Merge the pipeline into the existing registry
+            let existing = std::mem::take(&mut registry_guard.llm_pipeline);
+            let mut merged_interceptors = Vec::new();
+            
+            // Add existing interceptors
+            merged_interceptors.extend_from_slice(existing.interceptors());
+            
+            // Add new pipeline interceptors
+            merged_interceptors.extend_from_slice(llm_pipeline.interceptors());
+            
+            registry_guard.llm_pipeline = InterceptorPipeline {
+                interceptors: merged_interceptors,
+            };
+        }
+        
+        // Inject tool interceptor pipeline if provided
+        if let Some(tool_pipeline) = tool_pipeline {
+            let registry = baml_manager.interceptor_registry();
+            let mut registry_guard = registry.lock().await;
+            // Merge the pipeline into the existing registry
+            let existing = std::mem::take(&mut registry_guard.tool_pipeline);
+            let mut merged_interceptors = Vec::new();
+            
+            // Add existing interceptors
+            merged_interceptors.extend_from_slice(existing.interceptors());
+            
+            // Add new pipeline interceptors
+            merged_interceptors.extend_from_slice(tool_pipeline.interceptors());
+            
+            registry_guard.tool_pipeline = InterceptorPipeline {
+                interceptors: merged_interceptors,
+            };
+        }
+
         let baml_manager = Arc::new(Mutex::new(baml_manager));
 
         // Create QuickJS bridge if enabled
+        let quickjs_config_clone = self.config.quickjs_config.clone();
         let quickjs_bridge = if self.config.enable_quickjs {
             let mut bridge = QuickJSBridge::new_with_config(
                 baml_manager.clone(),
-                self.config.quickjs_config.clone(),
-            )?;
+                quickjs_config_clone,
+            ).await?;
             bridge.register_baml_functions().await?;
             Some(Arc::new(Mutex::new(bridge)))
         } else {

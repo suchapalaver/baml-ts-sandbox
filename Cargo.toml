@@ -1,12 +1,17 @@
-[package]
-name = "baml-rt"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = ["."]
+resolver = "2"
 
-[dependencies]
-baml-runtime = { path = "../baml/engine/baml-runtime" }
-baml-types = { path = "../baml/engine/baml-lib/baml-types" }
-internal-baml-core = { path = "../baml/engine/baml-lib/baml-core" }
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["BAML Runtime Team"]
+
+[workspace.dependencies]
+clap = { version = "4.4", features = ["derive"] }
+oxc_parser = "0.102"
+oxc_allocator = "0.102"
+oxc_span = "0.102"
 quickjs_runtime = "0.15"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -17,6 +22,159 @@ thiserror = "1.0"
 tokio = { version = "1.0", features = ["full"] }
 regex = "1.0"
 async-trait = "0.1"
+flate2 = "1.0"
+tar = "0.4"
+tokio-test = "0.4"
+tracing-test = "0.2"
+tempfile = "3.10"
+dotenvy = "0.15"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+
+[profile.dev]
+opt-level = 0
+debug = true
+
+[profile.test]
+opt-level = 0
+debug = true
+
+[package]
+name = "baml-rt"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "baml-agent-builder"
+path = "src/bin/baml-agent-builder.rs"
+
+[[bin]]
+name = "baml-agent-runner"
+path = "src/bin/baml-agent-runner.rs"
+
+# Unit Tests
+[[test]]
+name = "baml_runtime_test"
+path = "tests/unit/baml_runtime_test.rs"
+
+[[test]]
+name = "tool_registration_test"
+path = "tests/unit/tool_registration_test.rs"
+
+[[test]]
+name = "js_tool_registration_test"
+path = "tests/unit/js_tool_registration_test.rs"
+
+[[test]]
+name = "interceptor_test"
+path = "tests/unit/interceptor_test.rs"
+
+[[test]]
+name = "llm_interceptor_test"
+path = "tests/unit/llm_interceptor_test.rs"
+
+[[test]]
+name = "tracing_interceptor_test"
+path = "tests/unit/tracing_interceptor_test.rs"
+
+# Integration Tests
+[[test]]
+name = "baml_invoke_test"
+path = "tests/integration/baml_invoke_test.rs"
+
+[[test]]
+name = "baml_execution_test"
+path = "tests/integration/baml_execution_test.rs"
+
+
+[[test]]
+name = "quickjs_bridge_test"
+path = "tests/integration/quickjs_bridge_test.rs"
+
+[[test]]
+name = "quickjs_baml_invoke_test"
+path = "tests/integration/quickjs_baml_invoke_test.rs"
+
+[[test]]
+name = "quickjs_baml_stream_test"
+path = "tests/integration/quickjs_baml_stream_test.rs"
+
+[[test]]
+name = "quickjs_sandbox_test"
+path = "tests/integration/quickjs_sandbox_test.rs"
+
+[[test]]
+name = "cli_integration_test"
+path = "tests/integration/cli_integration_test.rs"
+
+[[test]]
+name = "integration_llm_interception_test"
+path = "tests/integration/integration_llm_interception_test.rs"
+
+# E2E Tests
+[[test]]
+name = "e2e_llm_test"
+path = "tests/e2e/e2e_llm_test.rs"
+
+[[test]]
+name = "e2e_tool_llm_test"
+path = "tests/e2e/e2e_tool_llm_test.rs"
+
+[[test]]
+name = "e2e_llm_tool_calling_test"
+path = "tests/e2e/e2e_llm_tool_calling_test.rs"
+
+[[test]]
+name = "e2e_baml_tool_calling_test"
+path = "tests/e2e/e2e_baml_tool_calling_test.rs"
+
+[[test]]
+name = "e2e_js_tool_llm_test"
+path = "tests/e2e/e2e_js_tool_llm_test.rs"
+
+[[test]]
+name = "e2e_trait_tool_system_test"
+path = "tests/e2e/e2e_trait_tool_system_test.rs"
+
+[[test]]
+name = "e2e_llm_interceptor_test"
+path = "tests/e2e/e2e_llm_interceptor_test.rs"
+
+[[test]]
+name = "e2e_agent_runner_test"
+path = "tests/e2e/e2e_agent_runner_test.rs"
+
+[[test]]
+name = "agent_runner_test"
+path = "tests/e2e/agent_runner_test.rs"
+
+[dependencies]
+clap.workspace = true
+oxc_parser.workspace = true
+oxc_allocator.workspace = true
+oxc_span.workspace = true
+baml-runtime = { path = "../baml/engine/baml-runtime" }
+baml-types = { path = "../baml/engine/baml-lib/baml-types" }
+internal-baml-core = { path = "../baml/engine/baml-lib/baml-core" }
+quickjs_runtime.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+regex.workspace = true
+async-trait.workspace = true
+flate2.workspace = true
+tar.workspace = true
 
 [dev-dependencies]
-tokio-test = "0.4"
+tokio-test.workspace = true
+tracing-test.workspace = true
+tempfile.workspace = true
+dotenvy.workspace = true

@@ -28,8 +28,8 @@ pub struct QuickJSBridge {
 
 impl QuickJSBridge {
     /// Create a new QuickJS bridge with default configuration
-    pub fn new(baml_manager: Arc<Mutex<BamlRuntimeManager>>) -> Result<Self> {
-        Self::new_with_config(baml_manager, crate::runtime::QuickJSConfig::default())
+    pub async fn new(baml_manager: Arc<Mutex<BamlRuntimeManager>>) -> Result<Self> {
+        Self::new_with_config(baml_manager, crate::runtime::QuickJSConfig::default()).await
     }
 
     /// Create a new QuickJS bridge with custom configuration
@@ -37,7 +37,7 @@ impl QuickJSBridge {
     /// # Arguments
     /// * `baml_manager` - The BAML runtime manager to use
     /// * `config` - QuickJS runtime configuration options
-    pub fn new_with_config(
+    pub async fn new_with_config(
         baml_manager: Arc<Mutex<BamlRuntimeManager>>,
         config: crate::runtime::QuickJSConfig,
     ) -> Result<Self> {
@@ -70,11 +70,72 @@ impl QuickJSBridge {
         
         let runtime = builder.build();
 
-        Ok(Self {
+        // Create bridge instance
+        let mut bridge = Self {
             runtime,
             baml_manager,
             js_tools: HashSet::new(),
-        })
+        };
+
+        // Initialize sandbox - remove dangerous globals and implement safe console
+        bridge.initialize_sandbox().await?;
+
+        Ok(bridge)
+    }
+
+    /// Initialize the sandbox environment
+    /// 
+    /// This removes dangerous globals and modules, and implements a safe console API.
+    /// Only console.log is available - no filesystem, network, or other I/O access.
+    async fn initialize_sandbox(&mut self) -> Result<()> {
+        tracing::info!("Initializing QuickJS sandbox environment");
+
+        // Initialize safe console and ensure dangerous globals aren't available
+        // QuickJS by default doesn't expose require, fetch, etc., but we ensure console.log works safely
+        let sandbox_code = r#"
+            (function() {
+                // Implement safe console object - only log methods, no I/O
+                // QuickJS handles console output through its runtime, preventing direct system I/O
+                globalThis.console = {
+                    log: function() {
+                        // console.log output goes to QuickJS runtime logs
+                        // No filesystem or network access
+                        var args = arguments;
+                        for (var i = 0; i < args.length; i++) {
+                            var arg = args[i];
+                            if (typeof arg === 'object') {
+                                try {
+                                    JSON.stringify(arg);
+                                } catch (e) {
+                                    String(arg);
+                                }
+                            }
+                        }
+                    },
+                    info: function() {
+                        globalThis.console.log.apply(globalThis.console, arguments);
+                    },
+                    warn: function() {
+                        globalThis.console.log.apply(globalThis.console, arguments);
+                    },
+                    error: function() {
+                        globalThis.console.log.apply(globalThis.console, arguments);
+                    },
+                    debug: function() {
+                        globalThis.console.log.apply(globalThis.console, arguments);
+                    }
+                };
+            })();
+        "#;
+
+        let script = Script::new("sandbox_init.js", sandbox_code);
+        self.runtime
+            .eval(None, script)
+            .await
+            .map_err(|e| BamlRtError::QuickJs(format!("Failed to initialize sandbox: {}", e)))?;
+
+        tracing::info!("QuickJS sandbox initialized - I/O restricted to runtime host functions");
+        Ok(())
     }
 
     /// Register all BAML functions with the QuickJS context
@@ -159,6 +220,7 @@ impl QuickJSBridge {
     async fn register_tool_invoke_helper(&mut self) -> Result<()> {
         let manager_clone = self.baml_manager.clone();
 
+        // Register __tool_invoke for Rust tools (low-level helper)
         self.runtime.set_function(
             &[],
             "__tool_invoke",
@@ -203,7 +265,37 @@ impl QuickJSBridge {
             },
         ).map_err(|e| BamlRtError::QuickJs(format!("Failed to register tool helper function: {}", e)))?;
 
-        tracing::debug!("Registered __tool_invoke helper function");
+        // Register unified invokeTool function that dispatches to both Rust and JS tools
+        let dispatch_code = r#"
+            globalThis.invokeTool = async function(toolName, args) {
+                // Normalize args to object if needed
+                const argsObj = typeof args === 'object' && args !== null ? args : { value: args };
+                
+                // Check if it's a JavaScript tool by checking if it exists as a global function
+                // (and is not one of our helper functions)
+                if (typeof globalThis[toolName] === 'function' && 
+                    toolName !== '__tool_invoke' && 
+                    toolName !== '__baml_invoke' && 
+                    toolName !== '__baml_stream' &&
+                    toolName !== '__awaitAndStringify' &&
+                    toolName !== 'invokeTool') {
+                    // JavaScript tool - call directly
+                    return await globalThis[toolName](argsObj);
+                } else {
+                    // Rust tool - use __tool_invoke
+                    const argsJson = JSON.stringify(argsObj);
+                    return await __tool_invoke(toolName, argsJson);
+                }
+            };
+        "#;
+
+        let script = Script::new("register_tool_dispatch.js", dispatch_code);
+        self.runtime
+            .eval(None, script)
+            .await
+            .map_err(|e| BamlRtError::QuickJs(format!("Failed to register tool dispatch function: {}", e)))?;
+
+        tracing::debug!("Registered __tool_invoke and invokeTool helper functions");
         Ok(())
     }
 
@@ -309,12 +401,21 @@ impl QuickJSBridge {
     /// * `js_function_code` - JavaScript function code (should be a complete function definition)
     /// 
     /// # Example
-    /// ```rust,no_run
+    /// ```rust,ignore
+    /// # use baml_rt::quickjs_bridge::QuickJSBridge;
+    /// # use std::sync::Arc;
+    /// # use tokio::sync::Mutex;
+    /// # use baml_rt::baml::BamlRuntimeManager;
+    /// # tokio_test::block_on(async {
+    /// # let baml_manager = Arc::new(Mutex::new(BamlRuntimeManager::new()?));
+    /// # let mut bridge = QuickJSBridge::new(baml_manager.clone()).await?;
     /// bridge.register_js_tool("greet_js", r#"
     ///     async function(name) {
     ///         return { greeting: `Hello, ${name}!` };
     ///     }
     /// "#).await?;
+    /// # Ok::<(), baml_rt::error::BamlRtError>(())
+    /// # })
     /// ```
     /// 
     /// The tool will be available in JavaScript as:

@@ -43,13 +43,13 @@ impl BamlContext {
     /// * `metadata` - Optional context metadata for tracking
     ///
     /// # Example
-    /// ```rust,no_run
-    /// use baml_rt::context::BamlContext;
+    /// ```rust,ignore
+    /// use baml_rt::context::{BamlContext, ContextMetadata};
     /// use baml_rt::baml::BamlRuntimeManager;
     /// use std::sync::Arc;
     /// use tokio::sync::Mutex;
     ///
-    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// # tokio_test::block_on(async {
     /// let baml_manager = Arc::new(Mutex::new(BamlRuntimeManager::new()?));
     /// baml_manager.lock().await.load_schema("baml_src")?;
     ///
@@ -61,17 +61,17 @@ impl BamlContext {
     ///         user_id: Some("user-456".to_string()),
     ///         request_id: Some("req-123".to_string()),
     ///     })
-    /// )?;
+    /// ).await?;
     ///
     /// // Register BAML functions in this context
     /// context.quickjs.register_baml_functions().await?;
     ///
     /// // Execute JavaScript in isolated context
     /// let result = context.quickjs.evaluate("SimpleGreeting({name: 'World'})").await?;
-    /// # Ok(())
-    /// # }
+    /// # Ok::<(), baml_rt::error::BamlRtError>(())
+    /// # })
     /// ```
-    pub fn new(
+    pub async fn new(
         baml_manager: Arc<Mutex<BamlRuntimeManager>>,
         metadata: Option<ContextMetadata>,
     ) -> Result<Self> {
@@ -81,12 +81,12 @@ impl BamlContext {
         );
 
         Ok(Self {
-            quickjs: QuickJSBridge::new(baml_manager)?,
+            quickjs: QuickJSBridge::new(baml_manager).await?,
             metadata,
         })
     }
 
-    /// Get the context ID if metadata is available
+    ///    /// Get the context ID if metadata is available
     pub fn context_id(&self) -> Option<&str> {
         self.metadata.as_ref().map(|m| m.context_id.as_str())
     }

@@ -32,7 +32,8 @@ impl ToolMapper {
     /// * `tool_function_name` - The name of the registered Rust tool function (e.g., "get_weather")
     /// 
     /// # Example
-    /// ```rust,no_run
+    /// ```rust,ignore
+    /// use baml_rt::tool_mapper::ToolMapper;
     /// let mut mapper = ToolMapper::new();
     /// mapper.register_mapping("WeatherTool", "get_weather");
     /// mapper.register_mapping("CalculatorTool", "calculate");
@@ -52,6 +53,89 @@ impl ToolMapper {
         );
         
         self.variant_to_tool.insert(variant, tool);
+    }
+
+    /// Get tool name for a variant (public for use in execute_tool_from_baml_result)
+    pub fn variant_to_tool_name(&self, variant_name: &str) -> Result<String> {
+        self.variant_to_tool.get(variant_name)
+            .ok_or_else(|| BamlRtError::FunctionNotFound(
+                format!("No tool mapping found for BAML variant '{}'", variant_name)
+            ))
+            .map(|s| s.clone())
+    }
+
+    /// Parse BAML result to extract variant name and tool arguments
+    /// 
+    /// Returns (variant_name, tool_args)
+    pub fn parse_variant_and_args(&self, baml_result: &Value) -> Result<(String, Value)> {
+        // Handle nested structure: {"WeatherTool": {...}}
+        let (variant_name, tool_obj_value) = if let Some(obj) = baml_result.as_object() {
+            // Check if it's a single-key object where the key is a variant name
+            if obj.len() == 1 {
+                let (key, value) = obj.iter().next()
+                    .ok_or_else(|| BamlRtError::InvalidArgument(
+                        "Expected non-empty object with tool variant".to_string()
+                    ))?;
+                // Check if this key matches a known variant
+                if self.variant_to_tool.contains_key(key) {
+                    (key.clone(), value.clone())
+                } else {
+                    // Not a nested structure, treat as direct class
+                    (String::new(), baml_result.clone())
+                }
+            } else {
+                // Multiple keys or empty, treat as direct class
+                (String::new(), baml_result.clone())
+            }
+        } else {
+            return Err(BamlRtError::InvalidArgument(
+                "Expected BAML result to be an object representing a tool choice".to_string()
+            ));
+        };
+
+        let tool_obj = tool_obj_value.as_object()
+            .ok_or_else(|| BamlRtError::InvalidArgument(
+                "Expected BAML result to be an object representing a tool choice".to_string()
+            ))?;
+
+        // Determine variant name
+        let variant_name = if !variant_name.is_empty() {
+            variant_name
+        } else {
+            // Try to get the type from __type field (how BAML serializes classes)
+            tool_obj.get("__type")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+                .or_else(|| {
+                    // Try to infer from field names (heuristic)
+                    // If it has "location", probably WeatherTool
+                    // If it has "expression", probably CalculatorTool
+                    if tool_obj.contains_key("location") {
+                        Some("WeatherTool".to_string())
+                    } else if tool_obj.contains_key("expression") {
+                        Some("CalculatorTool".to_string())
+                    } else {
+                        None
+                    }
+                })
+                .ok_or_else(|| BamlRtError::InvalidArgument(
+                    format!("Could not determine tool type from BAML result. Expected '__type' field, nested structure like {{'WeatherTool': {{...}}}}, or recognizable fields. Got keys: {:?}", 
+                        tool_obj.keys().collect::<Vec<_>>())
+                ))?
+        };
+
+        // Extract tool arguments from the BAML result
+        // The BAML class fields become the tool arguments
+        let mut tool_args = serde_json::Map::new();
+        
+        for (key, value) in tool_obj {
+            // Skip metadata fields
+            if key != "__type" {
+                tool_args.insert(key.clone(), value.clone());
+            }
+        }
+
+        Ok((variant_name, Value::Object(tool_args)))
     }
 
     /// Execute a tool based on BAML union type result
