@@ -61,7 +61,7 @@ impl ToolMapper {
             .ok_or_else(|| BamlRtError::FunctionNotFound(
                 format!("No tool mapping found for BAML variant '{}'", variant_name)
             ))
-            .map(|s| s.clone())
+            .cloned()
     }
 
     /// Parse BAML result to extract variant name and tool arguments

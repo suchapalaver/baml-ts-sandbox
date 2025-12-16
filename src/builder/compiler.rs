@@ -128,23 +128,28 @@ fn strip_typescript_types(ts_code: &str) -> String {
     use regex::Regex;
     let mut js = ts_code.to_string();
     
-    // Remove parameter type annotations: function(param: Type) -> function(param)
-    let param_type_pattern = Regex::new(r":\s*[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*")
-        .expect("Valid regex pattern");
-    js = param_type_pattern.replace_all(&js, "").to_string();
-    
-    // Remove return type annotations: ): ReturnType { -> ) {
-    let return_type_pattern = Regex::new(r"\)\s*:\s*[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*\s*\{")
+    // Remove return type annotations first (before parameter types): ): Promise<Type> { -> ) {
+    // Match ) followed by optional whitespace, :, optional whitespace, type (including generics), optional whitespace, {
+    let return_type_pattern = Regex::new(r"\)\s*:\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*)\s*\{")
         .expect("Valid regex pattern");
     js = return_type_pattern.replace_all(&js, ") {").to_string();
     
+    // Remove parameter type annotations in function signatures: function(param: Type) -> function(param)
+    // Match : followed by type (including Promise<...> and generics), stopping at , or )
+    // Without lookahead: match the type including the following comma/paren in a group, then restore the comma/paren
+    let param_type_pattern = Regex::new(r":\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*?)(\s*[,\)])")
+        .expect("Valid regex pattern");
+    js = param_type_pattern.replace_all(&js, "$1").to_string();
+    
     // Remove variable type annotations: let x: Type = ... -> let x = ...
-    let var_type_pattern = Regex::new(r":\s*[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*\s*([=;])")
+    // Match : followed by type, stopping at = or ;
+    // Without lookahead: match the type including the following =/; in a group, then restore it
+    let var_type_pattern = Regex::new(r":\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*?)(\s*[=;])")
         .expect("Valid regex pattern");
     js = var_type_pattern.replace_all(&js, "$1").to_string();
     
     // Remove 'as Type' type assertions
-    let as_type_pattern = Regex::new(r"\s+as\s+[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*")
+    let as_type_pattern = Regex::new(r"\s+as\s+(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*)")
         .expect("Valid regex pattern");
     js = as_type_pattern.replace_all(&js, "").to_string();
     

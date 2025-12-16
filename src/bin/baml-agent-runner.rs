@@ -4,10 +4,10 @@
 //! Each agent package is a tar.gz containing BAML schemas, compiled TypeScript,
 //! and metadata.
 
-use baml_rt::{BamlRtError, Result, quickjs_bridge::QuickJSBridge};
+use baml_rt::{BamlRtError, Result, quickjs_bridge::QuickJSBridge, spans};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -18,23 +18,19 @@ struct AgentManifest {
     version: String,
     name: String,
     entry_point: String,
-    description: Option<String>,
-    metadata: Option<Value>,
 }
 
 /// Agent package loader and executor
 struct AgentPackage {
     name: String,
-    manifest: AgentManifest,
-    extract_dir: PathBuf,
-    runtime_manager: Arc<tokio::sync::Mutex<baml_rt::baml::BamlRuntimeManager>>,
     js_bridge: Arc<tokio::sync::Mutex<QuickJSBridge>>,
 }
 
 impl AgentPackage {
     /// Load an agent package from a tar.gz file
     async fn load_from_file(package_path: &Path) -> Result<Self> {
-        info!(package = %package_path.display(), "Loading agent package");
+        let span = spans::load_agent_package(package_path);
+        let _guard = span.enter();
 
         // Create temporary extraction directory
         let extract_dir = std::env::temp_dir().join(format!(
@@ -47,19 +43,20 @@ impl AgentPackage {
         std::fs::create_dir_all(&extract_dir)
             .map_err(|e| BamlRtError::Io(e))?;
 
-        info!(extract_dir = %extract_dir.display(), "Extracting agent package");
+        {
+            let extract_span = spans::extract_package(&extract_dir);
+            let _extract_guard = extract_span.enter();
 
-        // Extract tar.gz
-        let tar_gz = std::fs::File::open(package_path)
-            .map_err(|e| BamlRtError::Io(e))?;
-        let tar = flate2::read::GzDecoder::new(tar_gz);
-        let mut archive = tar::Archive::new(tar);
+            // Extract tar.gz
+            let tar_gz = std::fs::File::open(package_path)
+                .map_err(|e| BamlRtError::Io(e))?;
+            let tar = flate2::read::GzDecoder::new(tar_gz);
+            let mut archive = tar::Archive::new(tar);
 
-        archive
-            .unpack(&extract_dir)
-            .map_err(|e| BamlRtError::Io(e))?;
-
-        info!("Package extracted successfully");
+            archive
+                .unpack(&extract_dir)
+                .map_err(|e| BamlRtError::Io(e))?;
+        }
 
         // Load manifest
         let manifest_path = extract_dir.join("manifest.json");
@@ -88,11 +85,6 @@ impl AgentPackage {
                 .and_then(|v| v.as_str())
                 .unwrap_or("dist/index.js")
                 .to_string(),
-            description: manifest_json
-                .get("description")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string()),
-            metadata: manifest_json.get("metadata").cloned(),
         };
 
         info!(
@@ -114,31 +106,38 @@ impl AgentPackage {
         let mut runtime_manager = baml_rt::baml::BamlRuntimeManager::new()?;
         
         // Load BAML schema
-        let baml_src_str = baml_src.to_str()
-            .ok_or_else(|| BamlRtError::InvalidArgument(
-                "BAML source path contains invalid UTF-8".to_string()
-            ))?;
-        runtime_manager.load_schema(baml_src_str)?;
-
-        info!("BAML schema loaded for agent: {}", manifest.name);
+        {
+            let schema_span = spans::load_baml_schema(&baml_src);
+            let _schema_guard = schema_span.enter();
+            let baml_src_str = baml_src.to_str()
+                .ok_or_else(|| BamlRtError::InvalidArgument(
+                    "BAML source path contains invalid UTF-8".to_string()
+                ))?;
+            runtime_manager.load_schema(baml_src_str)?;
+            info!(agent = manifest.name, "BAML schema loaded");
+        }
 
         // Create QuickJS bridge and expose BAML functions to it
         let runtime_manager_arc = Arc::new(Mutex::new(runtime_manager));
-        let mut js_bridge = QuickJSBridge::new(runtime_manager_arc.clone()).await?;
-        js_bridge.register_baml_functions().await?;
-
-        info!("BAML functions registered with QuickJS for agent: {}", manifest.name);
+        let mut js_bridge = {
+            let bridge_span = spans::create_js_bridge();
+            let _bridge_guard = bridge_span.enter();
+            let mut bridge = QuickJSBridge::new(runtime_manager_arc.clone()).await?;
+            bridge.register_baml_functions().await?;
+            info!(agent = manifest.name, "BAML functions registered with QuickJS");
+            bridge
+        };
 
         // Load agent's JavaScript code from dist/entry_point
         let entry_point_path = extract_dir.join(&manifest.entry_point);
         if entry_point_path.exists() {
+            let eval_span = spans::evaluate_agent_code(&manifest.entry_point);
+            let _eval_guard = eval_span.enter();
+
             let agent_code = std::fs::read_to_string(&entry_point_path)
                 .map_err(|e| BamlRtError::Io(e))?;
             
-            info!(
-                entry_point = manifest.entry_point,
-                "Loading agent JavaScript code"
-            );
+            info!(entry_point = manifest.entry_point, "Loading agent JavaScript code");
 
             // Execute the agent's code to initialize it
             // The code should expose functions that can be called later
@@ -163,10 +162,7 @@ impl AgentPackage {
         }
 
         Ok(Self {
-            name: manifest.name.clone(),
-            manifest,
-            extract_dir,
-            runtime_manager: runtime_manager_arc,
+            name: manifest.name,
             js_bridge: Arc::new(Mutex::new(js_bridge)),
         })
     }
@@ -181,61 +177,12 @@ impl AgentPackage {
     /// First tries to call it as a JavaScript function exposed by the agent,
     /// then falls back to calling it as a BAML function directly.
     async fn invoke_function(&self, function_name: &str, args: Value) -> Result<Value> {
-        // Create JavaScript code to call the function
-        let args_json = serde_json::to_string(&args)
-            .map_err(BamlRtError::Json)?;
-        
-        // Try to call the function as a JavaScript function from the agent code
-        // We need to parse the args_json and pass them correctly to the function
-        let js_code = format!(
-            r#"
-            (function() {{
-                try {{
-                    const argsObj = {};
-                    if (typeof {} === 'function') {{
-                        // Call agent's JavaScript function
-                        // Parse the JSON args and pass them appropriately
-                        const args = {};
-                        const promise = {}(args);
-                        // __awaitAndStringify returns a promise - we need to handle this differently
-                        // For now, return the promise and let it be handled
-                        return __awaitAndStringify(promise);
-                    }} else {{
-                        // Fallback: call BAML function directly via runtime host
-                        const promise = __baml_invoke("{}", {});
-                        return __awaitAndStringify(promise);
-                    }}
-                }} catch (error) {{
-                    return JSON.stringify({{ error: error.message || String(error) }});
-                }}
-            }})()
-            "#,
-            function_name, args_json, function_name, args_json,
-            function_name, args_json
-        );
-
-        // Try calling as a JavaScript function from the agent code
+        // Delegate to QuickJSBridge's shared implementation
+        // QuickJSBridge handles checking globalThis functions and falling back to BAML
         let mut js_bridge = self.js_bridge.lock().await;
-        let js_result = js_bridge.evaluate(&js_code).await;
-        drop(js_bridge);
-        
-        match js_result {
-            Ok(value) => Ok(value),
-            Err(_) => {
-                // Fallback to direct BAML invocation
-                let manager = self.runtime_manager.lock().await;
-                manager.invoke_function(function_name, args).await
-            }
-        }
+        js_bridge.invoke_function(function_name, args).await
     }
 
-    /// List available functions in this agent
-    async fn list_functions(&self) -> Vec<String> {
-        let manager = self.runtime_manager.lock().await;
-        // TODO: Implement function listing if available
-        // For now, return empty vec - functions are discovered from BAML schema
-        vec![]
-    }
 }
 
 /// Agent runner that manages multiple agent packages
@@ -266,16 +213,13 @@ impl AgentRunner {
         function_name: &str,
         args: Value,
     ) -> Result<Value> {
+        let span = spans::invoke_function(agent_name, function_name);
+        let _guard = span.enter();
+
         let agent = self.agents.get(agent_name)
             .ok_or_else(|| BamlRtError::InvalidArgument(
                 format!("Agent '{}' not found", agent_name)
             ))?;
-        
-        info!(
-            agent = agent_name,
-            function = function_name,
-            "Invoking agent function"
-        );
         
         agent.invoke_function(function_name, args).await
     }
@@ -293,6 +237,8 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
                 .add_directive("baml_rt=debug".parse().unwrap_or_default())
+                .add_directive("quickjs_runtime::quickjsrealmadapter=warn".parse().unwrap_or_else(|_| tracing_subscriber::filter::Directive::default()))
+                .add_directive("quickjs_runtime::typescript=warn".parse().unwrap_or_else(|_| tracing_subscriber::filter::Directive::default()))
         )
         .init();
 
@@ -343,7 +289,7 @@ async fn main() -> anyhow::Result<()> {
             
             match runner.load_agent(package_path).await {
                 Ok(_) => {
-                    info!("Agent package loaded: {}", package_path.display());
+                    info!(package_path = %package_path.display(), "Agent package loaded");
                 }
                 Err(e) => {
                     error!(error = %e, package = %package_path.display(), "Failed to load agent package");

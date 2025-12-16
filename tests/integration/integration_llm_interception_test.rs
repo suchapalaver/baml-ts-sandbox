@@ -259,7 +259,7 @@ async fn test_post_execution_interception_integration() {
         
         for (idx, (context, success, duration_ms)) in post_calls_guard.iter().enumerate() {
             assert_eq!(context.function_name, "SimpleGreeting", "Function name should match");
-            assert!(*duration_ms >= 0, "Duration should be non-negative");
+            // duration_ms is u64, so it's always >= 0
             tracing::info!(
                 "  ✅ Post-execution call #{}: client='{}', model='{}', success={}, duration={}ms",
                 idx + 1,

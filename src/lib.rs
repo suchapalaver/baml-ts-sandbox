@@ -4,6 +4,7 @@
 //! Rust execution runtime, and QuickJS JavaScript engine.
 
 pub mod baml;
+pub mod spans;
 pub mod baml_execution;
 pub mod quickjs_bridge;
 pub mod types;

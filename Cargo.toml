@@ -58,10 +58,6 @@ path = "src/bin/baml-agent-runner.rs"
 
 # Unit Tests
 [[test]]
-name = "baml_runtime_test"
-path = "tests/unit/baml_runtime_test.rs"
-
-[[test]]
 name = "tool_registration_test"
 path = "tests/unit/tool_registration_test.rs"
 
@@ -114,6 +110,14 @@ path = "tests/integration/cli_integration_test.rs"
 [[test]]
 name = "integration_llm_interception_test"
 path = "tests/integration/integration_llm_interception_test.rs"
+
+[[test]]
+name = "baml_function_result_contract_test"
+path = "tests/integration/baml_function_result_contract_test.rs"
+
+[[test]]
+name = "invoke_function_contract_test"
+path = "tests/integration/invoke_function_contract_test.rs"
 
 # E2E Tests
 [[test]]

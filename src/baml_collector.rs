@@ -45,7 +45,7 @@ impl BamlLLMCollector {
     }
 
     /// Track a function call ID so we can later process its trace events
-    pub fn track_function_call(&self, function_id: impl Clone + Send + Sync + 'static) {
+    pub fn track_function_call(&self, _function_id: impl Clone + Send + Sync + 'static) {
         // The collector will automatically track this when we pass it to call_function
         // But we expose this method for manual tracking if needed
     }
@@ -56,7 +56,6 @@ impl BamlLLMCollector {
     /// 
     /// Note: This uses the last function log tracked by the collector.
     pub async fn process_trace_events(&self) -> Result<()> {
-        use baml_runtime::tracingv2::storage::storage::FunctionLog;
         
         // Get the last function log tracked by this collector
         // The collector tracks function IDs as they're executed when passed to call_function

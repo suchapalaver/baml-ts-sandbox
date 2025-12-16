@@ -55,19 +55,16 @@ impl BamlRuntimeManager {
         tracing::info!(schema_path = schema_path, "Loading BAML IL");
         
         use std::path::Path;
-        use std::fs;
         
         // Find project root
         let schema_path_obj = Path::new(schema_path);
         let project_root = if schema_path_obj.is_file() {
             schema_path_obj.parent()
                 .and_then(|p| p.parent())
+        } else if schema_path_obj.file_name() == Some(std::ffi::OsStr::new("baml_src")) {
+            schema_path_obj.parent()
         } else {
-            if schema_path_obj.file_name() == Some(std::ffi::OsStr::new("baml_src")) {
-                schema_path_obj.parent()
-            } else {
-                Some(schema_path_obj)
-            }
+            Some(schema_path_obj)
         }
         .ok_or_else(|| BamlRtError::InvalidArgument("Invalid schema path".to_string()))?;
         
@@ -235,7 +232,7 @@ impl BamlRuntimeManager {
     /// 
     /// This will call tool interceptors before and after execution.
     pub async fn execute_tool(&self, name: &str, args: Value) -> Result<Value> {
-        use crate::interceptor::{ToolCallContext, InterceptorDecision};
+        use crate::interceptor::ToolCallContext;
         use std::time::Instant;
         
         let start = Instant::now();
@@ -250,7 +247,7 @@ impl BamlRuntimeManager {
         
         // Run interceptors before execution
         let interceptor_registry = self.interceptor_registry.lock().await;
-        let decision = interceptor_registry.intercept_tool_call(&context).await?;
+        let _decision = interceptor_registry.intercept_tool_call(&context).await?;
         drop(interceptor_registry);
         
         // Handle interceptor decision

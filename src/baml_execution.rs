@@ -5,12 +5,12 @@
 
 use crate::error::{BamlRtError, Result};
 use crate::tools::ToolRegistry;
-use crate::interceptor::{InterceptorRegistry, LLMCallContext, InterceptorDecision};
+use crate::interceptor::{InterceptorRegistry, InterceptorDecision};
 use crate::baml_collector::BamlLLMCollector;
-use crate::baml_pre_execution::{extract_context_from_http_request, intercept_llm_call_pre_execution};
+use crate::baml_pre_execution::intercept_llm_call_pre_execution;
 use baml_runtime::{BamlRuntime, FunctionResultStream, RuntimeContextManager};
 use baml_types::BamlValue;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
@@ -21,7 +21,9 @@ use tokio::sync::Mutex;
 pub struct BamlExecutor {
     runtime: Arc<BamlRuntime>,
     ctx_manager: RuntimeContextManager,
+    #[allow(dead_code)]
     pub(crate) functions: HashMap<String, String>, // function name -> placeholder (for discovery)
+    #[allow(dead_code)]
     tool_registry: Arc<Mutex<ToolRegistry>>,
 }
 
@@ -83,7 +85,7 @@ impl BamlExecutor {
         &self,
         function_name: &str,
         args: Value,
-        tool_registry: Option<Arc<Mutex<ToolRegistry>>>,
+        _tool_registry: Option<Arc<Mutex<ToolRegistry>>>,
         interceptor_registry: Option<Arc<Mutex<InterceptorRegistry>>>,
     ) -> Result<Value> {
         tracing::debug!(
@@ -110,17 +112,15 @@ impl BamlExecutor {
         let cancel_tripwire = baml_runtime::TripWire::new(None);
         
         // Track execution start time for LLM interceptor callbacks
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         
         // Create collector for LLM interception if registry is provided
-        let collector: Option<BamlLLMCollector> = if let Some(registry) = &interceptor_registry {
-            Some(BamlLLMCollector::new(
+        let collector: Option<BamlLLMCollector> = interceptor_registry.as_ref().map(|registry| {
+            BamlLLMCollector::new(
                 registry.clone(),
                 function_name.to_string(),
-            ))
-        } else {
-            None
-        };
+            )
+        });
         
         // TODO: Integrate tool registry with BAML's function calling mechanism
         // For now, tools are registered but not passed to the LLM
@@ -162,7 +162,7 @@ impl BamlExecutor {
             None
         };
         
-        let (result, call_id) = self.runtime.call_function(
+        let (result, _call_id) = self.runtime.call_function(
             function_name.to_string(),
             &params,
             &self.ctx_manager,
@@ -273,6 +273,7 @@ impl BamlExecutor {
     }
     
     /// Convert JSON Value to BamlValue
+    #[allow(clippy::only_used_in_recursion)]
     fn json_to_baml_value(&self, value: &Value) -> Result<BamlValue> {
         match value {
             Value::String(s) => Ok(BamlValue::String(s.clone())),
@@ -305,6 +306,7 @@ impl BamlExecutor {
     }
 
     #[allow(dead_code)]
+    #[allow(clippy::only_used_in_recursion)]
     fn baml_value_to_json(&self, value: &BamlValue) -> Result<Value> {
         match value {
             BamlValue::String(s) => Ok(Value::String(s.clone())),
