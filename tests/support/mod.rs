@@ -2,9 +2,8 @@
 //!
 //! This module provides helpers, fixtures, and utilities for writing tests.
 
-pub mod tools;
 pub mod fixtures;
+pub mod tools;
 
-pub use tools::*;
 pub use fixtures::*;
-
+pub use tools::*;

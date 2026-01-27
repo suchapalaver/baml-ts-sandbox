@@ -12,23 +12,25 @@ use tokio::sync::Mutex;
 async fn test_js_invoke_baml_function() {
     // Set up BAML runtime
     let mut baml_manager = BamlRuntimeManager::new().unwrap();
-    
+
     // Load BAML schema from agent fixture (which has baml_src directory)
     let agent_dir = common::agent_fixture("complex-agent");
     assert!(
         agent_dir.join("baml_src").exists(),
         "complex-agent fixture must have baml_src directory"
     );
-    baml_manager.load_schema(agent_dir.to_str().unwrap()).unwrap();
-    
+    baml_manager
+        .load_schema(agent_dir.to_str().unwrap())
+        .unwrap();
+
     let baml_manager = Arc::new(Mutex::new(baml_manager));
-    
+
     // Create QuickJS bridge
     let mut bridge = QuickJSBridge::new(baml_manager.clone()).await.unwrap();
-    
+
     // Register BAML functions
     bridge.register_baml_functions().await.unwrap();
-    
+
     // Test invoking SimpleGreeting from JavaScript (complex-agent has this function)
     // Use __awaitAndStringify helper to handle async function calls
     let js_code = r#"
@@ -41,23 +43,26 @@ async fn test_js_invoke_baml_function() {
             }
         })()
     "#;
-    
+
     let result = bridge.evaluate(js_code).await;
-    
+
     // The result should contain either success with result, or error info
     // Note: This may fail due to missing API keys, which is acceptable
     // We just want to verify the function can be invoked from JS
     let json_result = match result {
         Ok(val) => val,
         Err(e) => {
-            println!("JavaScript execution error (may be due to missing API keys): {:?}", e);
+            println!(
+                "JavaScript execution error (may be due to missing API keys): {:?}",
+                e
+            );
             // The function exists and was called, but execution failed (likely API key issue)
             // This is acceptable for integration tests
             return;
         }
     };
     println!("JavaScript execution result: {:?}", json_result);
-    
+
     // Check if we got a proper result
     // The result might be a promise that needs to be awaited, or it might be an object
     // For now, just verify that we can call the function and get some response
@@ -72,10 +77,12 @@ async fn test_js_invoke_baml_function() {
             println!("Got different result format: {:?}", obj);
         }
     }
-    
+
     // At minimum, verify that the JavaScript code executed without syntax errors
     // The actual BAML call is happening (we see it in the logs), so the bridge is working
     // The issue is just in how we're capturing the result
-    assert!(true, "JavaScript execution completed - BAML function was invoked (see logs)");
+    assert!(
+        true,
+        "JavaScript execution completed - BAML function was invoked (see logs)"
+    );
 }
-

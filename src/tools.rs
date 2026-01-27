@@ -4,26 +4,26 @@
 //! that can be called by LLMs during BAML function execution or directly from JavaScript.
 
 use crate::error::{BamlRtError, Result};
+use async_trait::async_trait;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 /// Trait for BAML tools that can be called by LLMs or JavaScript
-/// 
+///
 /// Tools implement this trait to provide:
 /// - Name and metadata
 /// - Input schema for LLM understanding
 /// - Execution logic
-/// 
+///
 /// # Example
 /// ```rust,ignore
 /// use baml_rt::tools::BamlTool;
 /// use serde_json::{json, Value};
 /// use async_trait::async_trait;
-/// 
+///
 /// struct WeatherTool;
-/// 
+///
 /// #[async_trait]
 /// impl BamlTool for WeatherTool {
 ///     const NAME: &'static str = "get_weather";
@@ -53,18 +53,18 @@ use async_trait::async_trait;
 pub trait BamlTool: Send + Sync + 'static {
     /// The unique name of this tool
     const NAME: &'static str;
-    
+
     /// Description of what this tool does (used by LLMs to understand when to call it)
     fn description(&self) -> &'static str;
-    
+
     /// JSON schema describing the tool's input parameters
     fn input_schema(&self) -> Value;
-    
+
     /// Execute the tool with the given arguments
-    /// 
+    ///
     /// # Arguments
     /// * `args` - JSON object containing the tool's input parameters
-    /// 
+    ///
     /// # Returns
     /// JSON value representing the tool's output
     async fn execute(&self, args: Value) -> Result<Value>;
@@ -113,18 +113,18 @@ impl ToolRegistry {
     }
 
     /// Register a tool that implements the BamlTool trait
-    /// 
+    ///
     /// # Arguments
     /// * `tool` - An instance of a type implementing `BamlTool`
-    /// 
+    ///
     /// # Example
     /// ```rust,ignore
     /// use baml_rt::tools::{ToolRegistry, BamlTool};
     /// use serde_json::json;
     /// use async_trait::async_trait;
-    /// 
+    ///
     /// struct MyTool;
-    /// 
+    ///
     /// #[async_trait]
     /// impl BamlTool for MyTool {
     ///     const NAME: &'static str = "my_tool";
@@ -134,13 +134,13 @@ impl ToolRegistry {
     ///         Ok(json!({}))
     ///     }
     /// }
-    /// 
+    ///
     /// let mut registry = ToolRegistry::new();
     /// registry.register(MyTool)?;
     /// ```
     pub fn register<T: BamlTool>(&mut self, tool: T) -> Result<()> {
         let name = T::NAME.to_string();
-        
+
         if self.tools.contains_key(&name) {
             return Err(BamlRtError::InvalidArgument(format!(
                 "Tool '{}' is already registered",
@@ -158,7 +158,7 @@ impl ToolRegistry {
         let tool_executor: Arc<dyn ToolExecutor> = Arc::new(ToolWrapper { tool });
 
         self.tools.insert(name.clone(), (metadata, tool_executor));
-        
+
         tracing::info!(
             tool = name.as_str(),
             description = description_str.as_str(),
@@ -185,7 +185,9 @@ impl ToolRegistry {
 
     /// Execute a tool function by name
     pub async fn execute(&self, name: &str, args: Value) -> Result<Value> {
-        let (_, tool_executor) = self.tools.get(name)
+        let (_, tool_executor) = self
+            .tools
+            .get(name)
             .ok_or_else(|| BamlRtError::FunctionNotFound(format!("Tool '{}' not found", name)))?;
 
         tracing::debug!(

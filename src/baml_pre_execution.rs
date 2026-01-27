@@ -4,7 +4,7 @@
 //! to intercept LLM calls before the HTTP request is sent.
 
 use crate::error::{BamlRtError, Result};
-use crate::interceptor::{InterceptorRegistry, LLMCallContext, InterceptorDecision};
+use crate::interceptor::{InterceptorDecision, InterceptorRegistry, LLMCallContext};
 use baml_runtime::RuntimeContextManager;
 use baml_types::{BamlMap, BamlValue};
 use serde_json::json;
@@ -13,7 +13,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Extract LLM call context from BAML's HTTPRequest
-/// 
+///
 /// This extracts the client, model, and prompt information from the HTTPRequest
 /// that BAML builds before sending to the LLM.
 pub fn extract_context_from_http_request(
@@ -25,12 +25,9 @@ pub fn extract_context_from_http_request(
     // ClientDetails has fields: name, provider, options
     let (client, model) = {
         let client_details = &http_request.client_details;
-        (
-            client_details.name.clone(),
-            client_details.provider.clone(),
-        )
+        (client_details.name.clone(), client_details.provider.clone())
     };
-    
+
     // Extract prompt/messages from the request body
     // body is directly an HTTPBody, not an Option
     let prompt = {
@@ -59,7 +56,7 @@ pub fn extract_context_from_http_request(
 }
 
 /// Intercept an LLM call before execution using build_request
-/// 
+///
 /// This builds the HTTP request, extracts context, runs interceptors,
 /// and returns the decision. If blocked, returns an error.
 pub async fn intercept_llm_call_pre_execution(
@@ -73,15 +70,17 @@ pub async fn intercept_llm_call_pre_execution(
 ) -> Result<InterceptorDecision> {
     // Build the HTTP request to get LLM call details
     // This doesn't actually send the request, just builds it
-    let http_request_result = runtime.build_request(
-        function_name.to_string(),
-        params,
-        ctx_manager,
-        None, // type_builder
-        None, // client_registry
-        env_vars,
-        stream,
-    ).await;
+    let http_request_result = runtime
+        .build_request(
+            function_name.to_string(),
+            params,
+            ctx_manager,
+            None, // type_builder
+            None, // client_registry
+            env_vars,
+            stream,
+        )
+        .await;
 
     let http_request = http_request_result
         .map_err(|e| BamlRtError::BamlRuntime(format!("Failed to build request: {}", e)))?;
@@ -104,4 +103,3 @@ pub async fn intercept_llm_call_pre_execution(
     // Return the decision
     Ok(decision)
 }
-

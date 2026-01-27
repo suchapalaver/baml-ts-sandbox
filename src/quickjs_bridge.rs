@@ -17,7 +17,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Bridge between QuickJS JavaScript runtime and BAML functions
-/// 
+///
 /// BAML functions execute in Rust. This bridge exposes them to QuickJS
 /// so JavaScript code can call them.
 pub struct QuickJSBridge {
@@ -33,7 +33,7 @@ impl QuickJSBridge {
     }
 
     /// Create a new QuickJS bridge with custom configuration
-    /// 
+    ///
     /// # Arguments
     /// * `baml_manager` - The BAML runtime manager to use
     /// * `config` - QuickJS runtime configuration options
@@ -51,23 +51,23 @@ impl QuickJSBridge {
 
         // Initialize QuickJS runtime using builder and apply configuration
         let mut builder = QuickJsRuntimeBuilder::new();
-        
+
         if let Some(limit) = config.memory_limit {
             builder = builder.memory_limit(limit);
         }
-        
+
         if let Some(stack_size) = config.max_stack_size {
             builder = builder.max_stack_size(stack_size);
         }
-        
+
         if let Some(threshold) = config.gc_threshold {
             builder = builder.gc_threshold(threshold);
         }
-        
+
         if let Some(interval) = config.gc_interval {
             builder = builder.gc_interval(interval);
         }
-        
+
         let runtime = builder.build();
 
         // Create bridge instance
@@ -84,7 +84,7 @@ impl QuickJSBridge {
     }
 
     /// Initialize the sandbox environment
-    /// 
+    ///
     /// This removes dangerous globals and modules, and implements a safe console API.
     /// Only console.log is available - no filesystem, network, or other I/O access.
     async fn initialize_sandbox(&mut self) -> Result<()> {
@@ -139,7 +139,7 @@ impl QuickJSBridge {
     }
 
     /// Register all BAML functions with the QuickJS context
-    /// 
+    ///
     /// This maps Rust BAML functions to JavaScript callables.
     /// When JS calls the function, it will invoke the Rust BAML execution.
     pub async fn register_baml_functions(&mut self) -> Result<()> {
@@ -168,7 +168,7 @@ impl QuickJSBridge {
     /// Register all tool functions with QuickJS
     async fn register_tool_functions(&mut self) -> Result<()> {
         tracing::info!("Registering tool functions with QuickJS");
-        
+
         let manager = self.baml_manager.lock().await;
         let tools = manager.list_tools().await;
         drop(manager);
@@ -207,10 +207,9 @@ impl QuickJSBridge {
         );
 
         let script = Script::new("register_tool.js", &js_code);
-        self.runtime
-            .eval(None, script)
-            .await
-            .map_err(|e| BamlRtError::QuickJs(format!("Failed to register tool function: {}", e)))?;
+        self.runtime.eval(None, script).await.map_err(|e| {
+            BamlRtError::QuickJs(format!("Failed to register tool function: {}", e))
+        })?;
 
         tracing::debug!(tool = tool_name, "Registered tool function with QuickJS");
         Ok(())
@@ -249,9 +248,13 @@ impl QuickJSBridge {
                 let tool_name_clone = tool_name.clone();
                 let manager_for_promise = manager_clone.clone();
 
+                tracing::debug!(tool_name = %tool_name, "Creating promise for tool invocation");
+
                 Ok(JsValueFacade::new_promise::<JsValueFacade, _, ()>(async move {
+                    tracing::trace!(tool_name = %tool_name_clone, "Tool promise producer starting");
                     let manager = manager_for_promise.lock().await;
                     let result = manager.execute_tool(&tool_name_clone, args_json).await;
+                    tracing::trace!(tool_name = %tool_name_clone, success = result.is_ok(), "Tool execution completed");
 
                     match result {
                         Ok(json_value) => {
@@ -290,10 +293,9 @@ impl QuickJSBridge {
         "#;
 
         let script = Script::new("register_tool_dispatch.js", dispatch_code);
-        self.runtime
-            .eval(None, script)
-            .await
-            .map_err(|e| BamlRtError::QuickJs(format!("Failed to register tool dispatch function: {}", e)))?;
+        self.runtime.eval(None, script).await.map_err(|e| {
+            BamlRtError::QuickJs(format!("Failed to register tool dispatch function: {}", e))
+        })?;
 
         tracing::debug!("Registered __tool_invoke and invokeTool helper functions");
         Ok(())
@@ -302,7 +304,7 @@ impl QuickJSBridge {
     /// Register a helper function that JavaScript can call to invoke BAML functions
     async fn register_baml_invoke_helper(&mut self) -> Result<()> {
         let manager_clone = self.baml_manager.clone();
-        
+
         // Register a native Rust function that JavaScript can call
         // This function will handle the async BAML execution using promises
         self.runtime.set_function(
@@ -345,10 +347,13 @@ impl QuickJSBridge {
                 // Use JsValueFacade::new_promise to create a non-blocking promise
                 // The producer is a Future that will be executed asynchronously
                 // Type parameters: R is the result type (JsValueFacade), P is the Future, M is unused/mapper
+                tracing::debug!(function = %func_name, "Creating promise for BAML function invocation");
                 Ok(JsValueFacade::new_promise::<JsValueFacade, _, ()>(async move {
                     // Execute the BAML function asynchronously
+                    tracing::trace!(function = %func_name_clone, "BAML promise producer starting");
                     let manager = manager_for_promise.lock().await;
                     let result = manager.invoke_function(&func_name_clone, args_json).await;
+                    tracing::trace!(function = %func_name_clone, success = result.is_ok(), "BAML function execution completed");
 
                     match result {
                         Ok(json_value) => {
@@ -388,26 +393,26 @@ impl QuickJSBridge {
                 return value && typeof value.then === 'function';
             };
         "#;
-        
+
         let script = Script::new("await_helper.js", js_code);
         self.runtime
             .eval(None, script)
             .await
             .map_err(|e| BamlRtError::QuickJs(format!("Failed to register await helper: {}", e)))?;
-        
+
         tracing::debug!("Registered __awaitAndStringify helper function");
         Ok(())
     }
 
     /// Register a JavaScript tool function
-    /// 
+    ///
     /// JavaScript tools are implemented entirely in JavaScript and run in the QuickJS runtime.
     /// They are NOT available to Rust - they only exist in the JavaScript context.
-    /// 
+    ///
     /// # Arguments
     /// * `name` - The name of the tool (will be available as `globalThis.<name>`)
     /// * `js_function_code` - JavaScript function code (should be a complete function definition)
-    /// 
+    ///
     /// # Example
     /// ```rust,ignore
     /// # use baml_rt::quickjs_bridge::QuickJSBridge;
@@ -425,7 +430,7 @@ impl QuickJSBridge {
     /// # Ok::<(), baml_rt::error::BamlRtError>(())
     /// # })
     /// ```
-    /// 
+    ///
     /// The tool will be available in JavaScript as:
     /// ```javascript
     /// const result = await greet_js("World");
@@ -467,13 +472,12 @@ impl QuickJSBridge {
         );
 
         let script = Script::new("register_js_tool.js", &js_code);
-        self.runtime
-            .eval(None, script)
-            .await
-            .map_err(|e| BamlRtError::QuickJs(format!(
+        self.runtime.eval(None, script).await.map_err(|e| {
+            BamlRtError::QuickJs(format!(
                 "Failed to register JavaScript tool '{}': {}",
                 tool_name, e
-            )))?;
+            ))
+        })?;
 
         self.js_tools.insert(tool_name.clone());
 
@@ -498,7 +502,7 @@ impl QuickJSBridge {
     /// Register a helper function for streaming BAML function execution
     async fn register_baml_stream_helper(&mut self) -> Result<()> {
         let manager_clone = self.baml_manager.clone();
-        
+
         // Register a native Rust function that JavaScript can call for streaming
         self.runtime.set_function(
             &[],
@@ -537,16 +541,16 @@ impl QuickJSBridge {
                 Ok(JsValueFacade::new_promise::<JsValueFacade, _, ()>(async move {
                     use tokio::sync::mpsc;
                     let (tx, mut rx) = mpsc::channel::<serde_json::Value>(100);
-                    
+
                     let func_name_stream = func_name_clone.clone();
                     let args_json_stream = args_json.clone();
-                    
+
                     // Spawn a task to run the stream and send incremental results
                     tokio::spawn(async move {
                         // Create the stream
                         let manager = manager_for_stream.lock().await;
                         let stream_result = manager.invoke_function_stream(&func_name_stream, args_json_stream);
-                        
+
                         // Get context manager reference while we have the lock
                         let executor_ref = match manager.executor.as_ref() {
                             Some(exec) => exec,
@@ -559,7 +563,7 @@ impl QuickJSBridge {
                             }
                         };
                         let ctx_manager = executor_ref.ctx_manager();
-                        
+
                         // Create the stream
                         let mut stream = match stream_result {
                             Ok(s) => s,
@@ -570,7 +574,7 @@ impl QuickJSBridge {
                                 return;
                             }
                         };
-                        
+
                         // We need to keep the manager lock during stream execution
                         // because ctx_manager is a reference. For now, we'll collect all results
                         // in the callback and then drop the lock.
@@ -657,13 +661,14 @@ impl QuickJSBridge {
         );
 
         let script = Script::new("register_function.js", &js_code);
-        let _result = self.runtime
+        let _result = self
+            .runtime
             .eval(None, script)
             .await
             .map_err(|e| BamlRtError::QuickJs(format!("Failed to register function: {}", e)))?;
-        
+
         tracing::debug!(function = function_name, "Registered function with QuickJS");
-        
+
         Ok(())
     }
 
@@ -696,32 +701,69 @@ impl QuickJSBridge {
         );
 
         let script = Script::new("register_stream_function.js", &js_code);
-        let _result = self.runtime
-            .eval(None, script)
-            .await
-            .map_err(|e| BamlRtError::QuickJs(format!("Failed to register stream function: {}", e)))?;
-        
-        tracing::debug!(function = function_name, stream_function = stream_function_name, "Registered streaming function with QuickJS");
-        
+        let _result = self.runtime.eval(None, script).await.map_err(|e| {
+            BamlRtError::QuickJs(format!("Failed to register stream function: {}", e))
+        })?;
+
+        tracing::debug!(
+            function = function_name,
+            stream_function = stream_function_name,
+            "Registered streaming function with QuickJS"
+        );
+
         Ok(())
     }
 
     /// Execute JavaScript code in the QuickJS context
-    /// 
+    ///
     /// The code should return a JSON string or a promise that resolves to a JSON string.
     /// If code returns a promise, we wait for it to resolve.
     pub async fn evaluate(&mut self, code: &str) -> Result<Value> {
         tracing::trace!(code = code, "Executing JavaScript code");
-        
-        // First, try executing the code directly (for synchronous code like assignments)
-        // This handles agent initialization code that just assigns to globalThis
-        // If code already has a return statement (like in an IIFE), execute as-is
-        // Otherwise, wrap it in an IIFE
+
         let code_trimmed = code.trim();
-        let already_wrapped = code_trimmed.starts_with("(function()") || code_trimmed.starts_with("(async function()");
-        
+
+        // Check if code is an async IIFE that returns a promise
+        let is_async_iife = code_trimmed.starts_with("(async function()");
+
+        if is_async_iife {
+            // For async IIFEs, wrap once with result-storing logic to avoid dual execution
+            let wrapped_code = format!(
+                r#"
+                (async function() {{
+                    try {{
+                        const codePromise = {};
+                        const result = await codePromise;
+                        globalThis.__eval_result = typeof result === 'string' ? result : JSON.stringify(result);
+                    }} catch (error) {{
+                        globalThis.__eval_result = JSON.stringify({{ error: error.toString() }});
+                    }}
+                }})()
+                "#,
+                code
+            );
+
+            let script = Script::new("eval.js", &wrapped_code);
+            tracing::debug!("Executing async IIFE with result-storing wrapper");
+
+            // Execute the code - this will set __eval_result when the promise resolves
+            let js_result = self.runtime.eval(None, script).await.map_err(|e| {
+                BamlRtError::QuickJs(format!("Failed to execute JavaScript: {}", e))
+            })?;
+            tracing::debug!(
+                is_string = js_result.is_string(),
+                "Async IIFE execution started"
+            );
+
+            // The wrapped code returns a promise - poll for result
+            return self.poll_for_result(&js_result).await;
+        }
+
+        // For non-async code, try executing directly first
+        let already_wrapped = code_trimmed.starts_with("(function()");
+
         let direct_code = if already_wrapped {
-            // Code is already wrapped in an IIFE - execute directly
+            // Code is already wrapped in a sync IIFE - execute directly
             code.to_string()
         } else {
             // Code needs wrapping - wrap in IIFE (preserves side effects for assignments)
@@ -729,9 +771,13 @@ impl QuickJSBridge {
         };
         let direct_script = Script::new("eval_direct.js", &direct_code);
         let direct_result = self.runtime.eval(None, direct_script).await;
-        
+
         // If direct execution succeeds and returns a non-promise, we're done
         if let Ok(js_result) = direct_result {
+            tracing::debug!(
+                is_string = js_result.is_string(),
+                "Direct execution result type"
+            );
             if js_result.is_string() {
                 // Got a string result - try parsing as JSON
                 let json_str = js_result.get_str();
@@ -744,60 +790,71 @@ impl QuickJSBridge {
             // Not a string - might be undefined/null from assignment code
             // Check if it's a promise
             let debug_str = format!("{:?}", js_result);
+            tracing::debug!(debug_str = %debug_str, "Checking if result is a promise");
             if !debug_str.contains("Promise") && !debug_str.contains("JsPromise") {
                 // Not a promise, code executed successfully (side effects happened)
                 // Return empty object to indicate success without a value
+                tracing::debug!("Result is not a promise, returning empty object");
                 return Ok(serde_json::json!({}));
             }
+            tracing::debug!("Result is a promise, will await it");
+
+            // Code returned a promise from sync IIFE - wrap and re-execute to store result
+            let wrapped_code = format!(
+                r#"
+                (async function() {{
+                    try {{
+                        const codePromise = {};
+                        const result = await codePromise;
+                        globalThis.__eval_result = typeof result === 'string' ? result : JSON.stringify(result);
+                    }} catch (error) {{
+                        globalThis.__eval_result = JSON.stringify({{ error: error.toString() }});
+                    }}
+                }})()
+                "#,
+                code
+            );
+
+            let script = Script::new("eval.js", &wrapped_code);
+            tracing::debug!("Executing sync code with async wrapper");
+
+            let js_result = self.runtime.eval(None, script).await.map_err(|e| {
+                BamlRtError::QuickJs(format!("Failed to execute JavaScript: {}", e))
+            })?;
+
+            return self.poll_for_result(&js_result).await;
         }
-        
-        // Code returned a promise - need to await it and store result
-        // The code is already wrapped in (function() { ... })(), so execute it directly
-        // It returns a promise (from __awaitAndStringify), so we await it
-        let wrapped_code = format!(
-            r#"
-            (async function() {{
-                try {{
-                    // Execute the code (it's already an IIFE) which returns a promise
-                    const codePromise = {};
-                    const result = await codePromise;
-                    // result is the JSON string from __awaitAndStringify
-                    globalThis.__eval_result = typeof result === 'string' ? result : JSON.stringify(result);
-                }} catch (error) {{
-                    globalThis.__eval_result = JSON.stringify({{ error: error.toString() }});
-                }}
-            }})()
-            "#,
-            code
-        );
-        
-        let script = Script::new("eval.js", &wrapped_code);
-        
-        // Execute the code - this will set __eval_result when the promise resolves
-        let js_result = self.runtime
-            .eval(None, script)
-            .await
-            .map_err(|e| BamlRtError::QuickJs(format!("Failed to execute JavaScript: {}", e)))?;
+
+        // Direct execution failed - try as error
+        Err(direct_result
+            .err()
+            .map(|e| BamlRtError::QuickJs(format!("Failed to execute JavaScript: {}", e)))
+            .unwrap())
+    }
+
+    /// Poll for __eval_result to be set by async code
+    async fn poll_for_result(&mut self, js_result: &JsValueFacade) -> Result<Value> {
+        let _debug_str = format!("{:?}", js_result);
 
         // Check if result is a string (synchronous code returned immediately)
         if js_result.is_string() {
             let json_str = js_result.get_str();
-            serde_json::from_str(json_str)
-                .map_err(BamlRtError::Json)
+            serde_json::from_str(json_str).map_err(BamlRtError::Json)
         } else {
             // Result is a promise - we need to wait for it to resolve
             // The async IIFE will set globalThis.__eval_result when done
             let debug_str = format!("{:?}", js_result);
-            
+
             // Check if it's a promise
             if debug_str.contains("Promise") || debug_str.contains("JsPromise") {
+                tracing::debug!(debug_str = %debug_str, "Wrapped code returned a promise, entering polling loop");
                 // Wait for the promise to resolve by running pending jobs in a loop
                 // and checking if __eval_result has been set
                 let poll_span = tracing::trace_span!("baml_rt.poll_promise_resolution");
                 let _poll_guard = poll_span.enter();
                 let mut attempts = 0;
                 const MAX_ATTEMPTS: u32 = 10000;
-                
+
                 loop {
                     // Check if result is available (trace level - happens many times per resolution)
                     let check_code = r#"
@@ -809,39 +866,61 @@ impl QuickJSBridge {
                         })()
                     "#;
                     let check_script = Script::new("check_result.js", check_code);
-                    let check_result = self.runtime
-                        .eval(None, check_script)
-                        .await
-                        .map_err(|e| BamlRtError::QuickJs(format!("Failed to check result: {}", e)))?;
-                    
+                    let check_result =
+                        self.runtime.eval(None, check_script).await.map_err(|e| {
+                            BamlRtError::QuickJs(format!("Failed to check result: {}", e))
+                        })?;
+
                     if check_result.is_string() {
                         let result_str = check_result.get_str();
                         // Clean up the global
-                        let _ = self.runtime.eval(None, Script::new("cleanup.js", "delete globalThis.__eval_result")).await;
+                        let _ = self
+                            .runtime
+                            .eval(
+                                None,
+                                Script::new("cleanup.js", "delete globalThis.__eval_result"),
+                            )
+                            .await;
                         tracing::trace!(attempts = attempts, "Promise resolved");
                         return serde_json::from_str(result_str).map_err(BamlRtError::Json);
                     }
-                    
+
                     // Run pending jobs - this is how quickjs_runtime processes promises
-                    // The runtime automatically polls Rust futures backing promises
-                    self.runtime.exe_rt_task_in_event_loop(|rt| {
-                        rt.run_pending_jobs_if_any();
-                    });
-                    
+                    // IMPORTANT: Use add_rt_task_to_event_loop (async) instead of exe_rt_task_in_event_loop (sync)
+                    // to allow the event loop to process tasks from the task queue (including promise resolutions
+                    // added by helper tasks via add_rt_task_to_event_loop_void)
+                    self.runtime
+                        .add_rt_task_to_event_loop(|rt| {
+                            rt.run_pending_jobs_if_any();
+                        })
+                        .await;
+
                     // Yield to Tokio to allow futures to progress
                     tokio::task::yield_now().await;
-                    
+
                     // Small delay to allow promise resolution
                     tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-                    
+
                     attempts += 1;
+                    // Log progress every 1000 attempts
+                    if attempts % 1000 == 0 {
+                        tracing::debug!(
+                            attempts = attempts,
+                            "Still polling for promise resolution"
+                        );
+                    }
                     if attempts >= MAX_ATTEMPTS {
                         // Clean up the global
-                        let _ = self.runtime.eval(None, Script::new("cleanup.js", "delete globalThis.__eval_result")).await;
+                        let _ = self
+                            .runtime
+                            .eval(
+                                None,
+                                Script::new("cleanup.js", "delete globalThis.__eval_result"),
+                            )
+                            .await;
                         return Err(BamlRtError::QuickJs(format!(
                             "Promise did not resolve after {} attempts ({}ms)",
-                            MAX_ATTEMPTS,
-                            MAX_ATTEMPTS
+                            MAX_ATTEMPTS, MAX_ATTEMPTS
                         )));
                     }
                 }
@@ -852,24 +931,39 @@ impl QuickJSBridge {
         }
     }
 
+    /// Drive the QuickJS event loop to process pending async operations
+    ///
+    /// This should be called periodically when running long-lived JavaScript code
+    /// that uses async operations (like a trading loop with tool invocations).
+    pub async fn drive_event_loop(&mut self) {
+        // Run any pending JavaScript jobs (microtasks, promise continuations)
+        self.runtime
+            .add_rt_task_to_event_loop(|rt| {
+                rt.run_pending_jobs_if_any();
+            })
+            .await;
+
+        // Yield to tokio to allow futures to progress
+        tokio::task::yield_now().await;
+    }
+
     /// Invoke a JavaScript function or BAML function by name
-    /// 
+    ///
     /// This is a helper method that generates and executes JavaScript code to:
     /// 1. Check if a function exists in globalThis (for JavaScript functions)
     /// 2. Fall back to calling it as a BAML function via __baml_invoke
     /// 3. Handle promises correctly using __awaitAndStringify
-    /// 
+    ///
     /// # Arguments
     /// * `function_name` - Name of the function to invoke
     /// * `args` - JSON arguments to pass to the function
-    /// 
+    ///
     /// # Returns
     /// The result of the function call, either as a string (for successful calls)
     /// or as an error object if the call failed
     pub async fn invoke_function(&mut self, function_name: &str, args: Value) -> Result<Value> {
-        let args_json = serde_json::to_string(&args)
-            .map_err(BamlRtError::Json)?;
-        
+        let args_json = serde_json::to_string(&args).map_err(BamlRtError::Json)?;
+
         // Generate JavaScript code that checks globalThis first, then falls back to BAML
         let js_code = format!(
             r#"
@@ -897,4 +991,3 @@ impl QuickJSBridge {
         self.evaluate(&js_code).await
     }
 }
-

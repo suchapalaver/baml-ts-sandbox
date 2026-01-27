@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// BAML collector wrapper that tracks LLM calls via trace events
-/// 
+///
 /// This wraps BAML's Collector to track function execution and extract
 /// LLM call information from trace events for interceptor notifications.
 pub struct BamlLLMCollector {
@@ -31,7 +31,10 @@ impl BamlLLMCollector {
         interceptor_registry: Arc<Mutex<InterceptorRegistry>>,
         function_name: String,
     ) -> Self {
-        let inner = Arc::new(Collector::new(Some(format!("llm_interceptor_{}", function_name))));
+        let inner = Arc::new(Collector::new(Some(format!(
+            "llm_interceptor_{}",
+            function_name
+        ))));
         Self {
             inner,
             interceptor_registry,
@@ -51,12 +54,11 @@ impl BamlLLMCollector {
     }
 
     /// Process trace events to extract LLM call information and notify interceptors
-    /// 
+    ///
     /// This should be called after function execution to process collected trace events.
-    /// 
+    ///
     /// Note: This uses the last function log tracked by the collector.
     pub async fn process_trace_events(&self) -> Result<()> {
-        
         // Get the last function log tracked by this collector
         // The collector tracks function IDs as they're executed when passed to call_function
         let mut function_log = match self.inner.last_function_log() {
@@ -67,42 +69,46 @@ impl BamlLLMCollector {
                 return Ok(());
             }
         };
-        
+
         // Extract LLM calls from the function log
         let llm_calls = function_log.calls();
-        
+
         // Process each LLM call and notify interceptors
         for call_kind in llm_calls {
             // Extract context from the LLM call
             if let Some(llm_call) = call_kind.as_request() {
                 let context = self.extract_context_from_llm_call(llm_call);
-                
+
                 // Extract duration from timing
                 let duration_ms = llm_call.timing.duration_ms.unwrap_or(0) as u64;
-                
+
                 // Notify interceptors (post-execution notification)
                 let registry = self.interceptor_registry.lock().await;
                 // For post-execution, we just notify of completion
-                let result: Result<serde_json::Value> = Ok(serde_json::to_value(llm_call)
-                    .unwrap_or_else(|_| json!({})));
-                registry.notify_llm_call_complete(&context, &result, duration_ms).await;
+                let result: Result<serde_json::Value> =
+                    Ok(serde_json::to_value(llm_call).unwrap_or_else(|_| json!({})));
+                registry
+                    .notify_llm_call_complete(&context, &result, duration_ms)
+                    .await;
             }
             // TODO: Handle stream calls (call_kind.as_stream())
         }
-        
+
         Ok(())
     }
 
     /// Extract LLM call context from an LLMCall
-    fn extract_context_from_llm_call(&self, call: &baml_runtime::tracingv2::storage::storage::LLMCall) -> LLMCallContext {
+    fn extract_context_from_llm_call(
+        &self,
+        call: &baml_runtime::tracingv2::storage::storage::LLMCall,
+    ) -> LLMCallContext {
         // Extract client/provider from the call
         let client = call.client_name.clone();
         let model = call.provider.clone(); // provider is the model/provider name
-        
+
         // Extract prompt/messages from the request if available
         let prompt = if let Some(ref http_request) = call.request {
-            serde_json::to_value(http_request.as_ref())
-                .unwrap_or_else(|_| json!({}))
+            serde_json::to_value(http_request.as_ref()).unwrap_or_else(|_| json!({}))
         } else {
             json!({})
         };
@@ -119,4 +125,3 @@ impl BamlLLMCollector {
         }
     }
 }
-

@@ -1,7 +1,7 @@
 //! Test fixture loading and creation helpers
 
-use std::path::{Path, PathBuf};
 use baml_rt::error::{BamlRtError, Result};
+use std::path::{Path, PathBuf};
 
 /// Get the path to a test fixture
 pub fn fixture_path(relative_path: &str) -> PathBuf {
@@ -30,15 +30,15 @@ pub fn package_fixture(name: &str) -> PathBuf {
 /// Load BAML fixture content
 pub fn load_baml_fixture(name: &str) -> Result<String> {
     let path = baml_fixture(name);
-    std::fs::read_to_string(&path)
-        .map_err(|e| BamlRtError::Io(std::io::Error::new(
+    std::fs::read_to_string(&path).map_err(|e| {
+        BamlRtError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            format!("Failed to load BAML fixture {}: {}", name, e)
-        )))
+            format!("Failed to load BAML fixture {}: {}", name, e),
+        ))
+    })
 }
 
 /// Check if a fixture exists
 pub fn fixture_exists(relative_path: &str) -> bool {
     fixture_path(relative_path).exists()
 }
-

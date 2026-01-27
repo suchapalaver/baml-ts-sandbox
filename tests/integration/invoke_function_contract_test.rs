@@ -1,5 +1,5 @@
 //! Contract test for invoke_function API
-//! 
+//!
 //! This test uses the ACTUAL LoadedAgent::invoke_function implementation
 //! to ensure the contract is maintained, not a duplicate.
 
@@ -18,21 +18,25 @@ use tokio::sync::Mutex;
 #[tokio::test]
 async fn test_loaded_agent_invoke_function_contract() {
     // Contract: LoadedAgent::invoke_function must return the actual result, not wrapped
-    
+
     use baml_rt::baml::BamlRuntimeManager;
     use baml_rt::quickjs_bridge::QuickJSBridge;
-    
+
     // Load agent exactly as load_agent_package does
     let agent_dir = common::agent_fixture("complex-agent");
-    
+
     // Extract logic from load_agent_package (the actual code)
     let mut runtime_manager = BamlRuntimeManager::new().unwrap();
-    runtime_manager.load_schema(agent_dir.to_str().unwrap()).unwrap();
-    
+    runtime_manager
+        .load_schema(agent_dir.to_str().unwrap())
+        .unwrap();
+
     let runtime_manager_arc = Arc::new(Mutex::new(runtime_manager));
-    let mut js_bridge = QuickJSBridge::new(runtime_manager_arc.clone()).await.unwrap();
+    let mut js_bridge = QuickJSBridge::new(runtime_manager_arc.clone())
+        .await
+        .unwrap();
     js_bridge.register_baml_functions().await.unwrap();
-    
+
     // Load agent JavaScript code (actual pattern from load_agent_package)
     let dist_path = agent_dir.join("dist").join("index.js");
     if dist_path.exists() {
@@ -48,12 +52,12 @@ async fn test_loaded_agent_invoke_function_contract() {
         "#;
         let _ = js_bridge.evaluate(agent_code).await;
     }
-    
+
     // Use the ACTUAL invoke_function logic from LoadedAgent (lines 257-290)
     let function_name = "greetUser";
     let args = json!({"name": "ContractTest"});
     let args_json = serde_json::to_string(&args).unwrap();
-    
+
     let js_code = format!(
         r#"
         (function() {{
@@ -73,21 +77,24 @@ async fn test_loaded_agent_invoke_function_contract() {
         "#,
         args_json, function_name, function_name, function_name
     );
-    
+
     let result = js_bridge.evaluate(&js_code).await.unwrap();
-    
+
     // CONTRACT: Result must be a string (the actual greeting), not {"success": true}
     assert!(
         result.is_string(),
         "CONTRACT VIOLATION: invoke_function must return string result, got: {:?}",
         result
     );
-    
+
     // CONTRACT: Must NOT be a success wrapper
     if let Some(obj) = result.as_object() {
-        panic!("CONTRACT VIOLATION: Result is object with 'success': {:?}. Must return actual result.", obj);
+        panic!(
+            "CONTRACT VIOLATION: Result is object with 'success': {:?}. Must return actual result.",
+            obj
+        );
     }
-    
+
     let greeting = result.as_str().unwrap();
     // API key errors are acceptable (proves function was called)
     if !greeting.contains("error") && !greeting.contains("401") {
@@ -98,4 +105,3 @@ async fn test_loaded_agent_invoke_function_contract() {
         );
     }
 }
-

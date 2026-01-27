@@ -1,8 +1,8 @@
 //! Compiler implementations for BAML and TypeScript
 
-use crate::error::{BamlRtError, Result};
-use crate::builder::traits::{TypeScriptCompiler, TypeGenerator, FileSystem};
+use crate::builder::traits::{FileSystem, TypeGenerator, TypeScriptCompiler};
 use crate::builder::types::BuildDir;
+use crate::error::{BamlRtError, Result};
 use std::fs;
 use std::path::Path;
 
@@ -25,12 +25,12 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
         let mut files = Vec::new();
         self.filesystem.collect_ts_files(src_dir, &mut files)?;
 
-        use oxc_parser::Parser;
         use oxc_allocator::Allocator;
+        use oxc_parser::Parser;
 
         for file_path in files {
             let content = fs::read_to_string(&file_path).map_err(BamlRtError::Io)?;
-            
+
             let allocator = Allocator::default();
             let source_type = oxc_span::SourceType::from_path(&file_path)
                 .unwrap_or_else(|_| oxc_span::SourceType::default());
@@ -38,7 +38,8 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
             let parse_result = parser.parse();
 
             if !parse_result.errors.is_empty() {
-                let errors: Vec<String> = parse_result.errors
+                let errors: Vec<String> = parse_result
+                    .errors
                     .iter()
                     .map(|e| format!("{:?}", e))
                     .collect();
@@ -50,11 +51,13 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
             }
 
             let js_code = strip_typescript_types(&content);
-            let relative_path = file_path.strip_prefix(src_dir)
-                .map_err(|_| BamlRtError::InvalidArgument(
-                    format!("File {} is not under src directory", file_path.display())
-                ))?;
-            
+            let relative_path = file_path.strip_prefix(src_dir).map_err(|_| {
+                BamlRtError::InvalidArgument(format!(
+                    "File {} is not under src directory",
+                    file_path.display()
+                ))
+            })?;
+
             let output_path = dist_dir.join(relative_path).with_extension("js");
             if let Some(parent) = output_path.parent() {
                 fs::create_dir_all(parent).map_err(BamlRtError::Io)?;
@@ -81,21 +84,25 @@ impl TypeGenerator for RuntimeTypeGenerator {
     async fn generate(&self, baml_src: &Path, build_dir: &BuildDir) -> Result<()> {
         use baml_runtime::BamlRuntime;
         use std::collections::HashMap;
-        
+
         // Load BAML runtime to discover functions
         let env_vars: HashMap<String, String> = HashMap::new();
         let feature_flags = internal_baml_core::feature_flags::FeatureFlags::default();
-        
-        let runtime = BamlRuntime::from_directory(baml_src, env_vars, feature_flags)
-            .map_err(|e| BamlRtError::InvalidArgument(
-                format!("Failed to load BAML runtime for type generation: {}", e)
-            ))?;
-        
+
+        let runtime =
+            BamlRuntime::from_directory(baml_src, env_vars, feature_flags).map_err(|e| {
+                BamlRtError::InvalidArgument(format!(
+                    "Failed to load BAML runtime for type generation: {}",
+                    e
+                ))
+            })?;
+
         // Get function names from runtime
         let function_names: Vec<String> = runtime.function_names().map(|s| s.to_string()).collect();
 
         // Generate type declarations
-        let mut declarations = String::from("// TypeScript declarations for BAML runtime host functions\n");
+        let mut declarations =
+            String::from("// TypeScript declarations for BAML runtime host functions\n");
         declarations.push_str("// This file is auto-generated - do not edit manually\n");
         declarations.push_str("// Generated from BAML runtime\n\n");
 
@@ -107,11 +114,12 @@ impl TypeGenerator for RuntimeTypeGenerator {
                 function_name, function_name
             ));
         }
-        
+
         // Add invokeTool declaration
         declarations.push_str("/**\n");
         declarations.push_str(" * Dynamically invoke a tool by name.\n");
-        declarations.push_str(" * Works for both Rust-registered tools and JavaScript-registered tools.\n");
+        declarations
+            .push_str(" * Works for both Rust-registered tools and JavaScript-registered tools.\n");
         declarations.push_str(" */\ndeclare function invokeTool(toolName: string, args: Record<string, any>): Promise<any>;\n\n");
 
         let output_path = build_dir.join("dist").join("baml-runtime.d.ts");
@@ -127,32 +135,35 @@ impl TypeGenerator for RuntimeTypeGenerator {
 fn strip_typescript_types(ts_code: &str) -> String {
     use regex::Regex;
     let mut js = ts_code.to_string();
-    
+
     // Remove return type annotations first (before parameter types): ): Promise<Type> { -> ) {
     // Match ) followed by optional whitespace, :, optional whitespace, type (including generics), optional whitespace, {
-    let return_type_pattern = Regex::new(r"\)\s*:\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*)\s*\{")
-        .expect("Valid regex pattern");
+    let return_type_pattern =
+        Regex::new(r"\)\s*:\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*)\s*\{")
+            .expect("Valid regex pattern");
     js = return_type_pattern.replace_all(&js, ") {").to_string();
-    
+
     // Remove parameter type annotations in function signatures: function(param: Type) -> function(param)
     // Match : followed by type (including Promise<...> and generics), stopping at , or )
     // Without lookahead: match the type including the following comma/paren in a group, then restore the comma/paren
-    let param_type_pattern = Regex::new(r":\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*?)(\s*[,\)])")
-        .expect("Valid regex pattern");
+    let param_type_pattern =
+        Regex::new(r":\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*?)(\s*[,\)])")
+            .expect("Valid regex pattern");
     js = param_type_pattern.replace_all(&js, "$1").to_string();
-    
+
     // Remove variable type annotations: let x: Type = ... -> let x = ...
     // Match : followed by type, stopping at = or ;
     // Without lookahead: match the type including the following =/; in a group, then restore it
-    let var_type_pattern = Regex::new(r":\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*?)(\s*[=;])")
-        .expect("Valid regex pattern");
+    let var_type_pattern =
+        Regex::new(r":\s*(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*?)(\s*[=;])")
+            .expect("Valid regex pattern");
     js = var_type_pattern.replace_all(&js, "$1").to_string();
-    
+
     // Remove 'as Type' type assertions
-    let as_type_pattern = Regex::new(r"\s+as\s+(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*)")
-        .expect("Valid regex pattern");
+    let as_type_pattern =
+        Regex::new(r"\s+as\s+(?:Promise<[^>]+>|[A-Za-z_][A-Za-z0-9_<>\[\]|&,.\s]*)")
+            .expect("Valid regex pattern");
     js = as_type_pattern.replace_all(&js, "").to_string();
-    
+
     js
 }
-

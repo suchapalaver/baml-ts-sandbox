@@ -3,11 +3,11 @@
 //! This module executes BAML functions using the compiled IL (Intermediate Language)
 //! from the BAML compiler.
 
-use crate::error::{BamlRtError, Result};
-use crate::tools::ToolRegistry;
-use crate::interceptor::{InterceptorRegistry, InterceptorDecision};
 use crate::baml_collector::BamlLLMCollector;
 use crate::baml_pre_execution::intercept_llm_call_pre_execution;
+use crate::error::{BamlRtError, Result};
+use crate::interceptor::{InterceptorDecision, InterceptorRegistry};
+use crate::tools::ToolRegistry;
 use baml_runtime::{BamlRuntime, FunctionResultStream, RuntimeContextManager};
 use baml_types::BamlValue;
 use serde_json::Value;
@@ -29,24 +29,21 @@ pub struct BamlExecutor {
 
 impl BamlExecutor {
     /// Load BAML IL from the compiled output
-    /// 
+    ///
     /// This loads the BAML runtime from the baml_src directory using from_directory
-    pub fn load_il(
-        baml_src_dir: &Path,
-        tool_registry: Arc<Mutex<ToolRegistry>>,
-    ) -> Result<Self> {
+    pub fn load_il(baml_src_dir: &Path, tool_registry: Arc<Mutex<ToolRegistry>>) -> Result<Self> {
         tracing::info!(?baml_src_dir, "Loading BAML runtime from directory");
-        
+
         // Use from_directory which handles feature flags internally
         // Load environment variables - BAML uses these for API keys
         let mut env_vars: HashMap<String, String> = HashMap::new();
-        
+
         // Load OPENROUTER_API_KEY from environment if present
         if let Ok(api_key) = std::env::var("OPENROUTER_API_KEY") {
             env_vars.insert("OPENROUTER_API_KEY".to_string(), api_key);
             tracing::debug!("Loaded OPENROUTER_API_KEY from environment");
         }
-        
+
         // Load other common API key environment variables
         for key in &["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY"] {
             if let Ok(value) = std::env::var(key) {
@@ -54,24 +51,24 @@ impl BamlExecutor {
                 tracing::debug!(api_key = key, "Loaded API key from environment");
             }
         }
-        
+
         let feature_flags = internal_baml_core::feature_flags::FeatureFlags::default();
-        
+
         let runtime = BamlRuntime::from_directory(baml_src_dir, env_vars, feature_flags)
             .map_err(|e| BamlRtError::BamlRuntime(format!("Failed to load BAML runtime: {}", e)))?;
-        
+
         // Create context manager
         let ctx_manager = runtime.create_ctx_manager(
             BamlValue::String("rust".to_string()),
             None, // baml_src_reader
         );
-        
+
         // Populate function map from runtime
         let function_map: HashMap<String, String> = runtime
             .function_names()
             .map(|name| (name.to_string(), name.to_string()))
             .collect();
-        
+
         Ok(Self {
             runtime: Arc::new(runtime),
             ctx_manager,
@@ -96,7 +93,7 @@ impl BamlExecutor {
 
         // Convert JSON args to BamlValue map
         let params = self.json_to_baml_map(&args)?;
-        
+
         // Call the function
         // Load environment variables for API keys
         let mut env_vars = HashMap::new();
@@ -110,22 +107,19 @@ impl BamlExecutor {
         }
         let tags = None;
         let cancel_tripwire = baml_runtime::TripWire::new(None);
-        
+
         // Track execution start time for LLM interceptor callbacks
         let _start_time = Instant::now();
-        
+
         // Create collector for LLM interception if registry is provided
-        let collector: Option<BamlLLMCollector> = interceptor_registry.as_ref().map(|registry| {
-            BamlLLMCollector::new(
-                registry.clone(),
-                function_name.to_string(),
-            )
-        });
-        
+        let collector: Option<BamlLLMCollector> = interceptor_registry
+            .as_ref()
+            .map(|registry| BamlLLMCollector::new(registry.clone(), function_name.to_string()));
+
         // TODO: Integrate tool registry with BAML's function calling mechanism
         // For now, tools are registered but not passed to the LLM
         // This requires understanding BAML's native tool calling support
-        
+
         // Pre-execution interception: intercept LLM calls before they're sent
         if let Some(ref registry) = interceptor_registry {
             match intercept_llm_call_pre_execution(
@@ -136,14 +130,17 @@ impl BamlExecutor {
                 registry,
                 env_vars.clone(),
                 false, // stream = false for regular calls
-            ).await {
+            )
+            .await
+            {
                 Ok(InterceptorDecision::Allow) => {
                     // Allow the call to proceed
                 }
                 Ok(InterceptorDecision::Block(msg)) => {
                     // Block the call - return error
                     return Err(BamlRtError::BamlRuntime(format!(
-                        "LLM call blocked by interceptor: {}", msg
+                        "LLM call blocked by interceptor: {}",
+                        msg
                     )));
                 }
                 Err(e) => {
@@ -152,7 +149,7 @@ impl BamlExecutor {
                 }
             }
         }
-        
+
         // Wire up the collector to track function execution
         // Note: We track the function call by passing the collector, but we also need
         // to manually track the call_id so we can process trace events later
@@ -161,35 +158,38 @@ impl BamlExecutor {
         } else {
             None
         };
-        
-        let (result, _call_id) = self.runtime.call_function(
-            function_name.to_string(),
-            &params,
-            &self.ctx_manager,
-            None, // type_builder
-            None, // client_registry
-            collectors, // collectors - now wired up to track execution
-            env_vars,
-            tags,
-            cancel_tripwire,
-        ).await;
-        
+
+        let (result, _call_id) = self
+            .runtime
+            .call_function(
+                function_name.to_string(),
+                &params,
+                &self.ctx_manager,
+                None,       // type_builder
+                None,       // client_registry
+                collectors, // collectors - now wired up to track execution
+                env_vars,
+                tags,
+                cancel_tripwire,
+            )
+            .await;
+
         let function_result = result
             .map_err(|e| BamlRtError::BamlRuntime(format!("Function execution failed: {}", e)))?;
-        
+
         // Extract the parsed value
         let parsed_opt = function_result.parsed();
-        let parsed_result = parsed_opt
-            .as_ref()
-            .ok_or_else(|| BamlRtError::BamlRuntime("Function returned no parsed result".to_string()))?;
+        let parsed_result = parsed_opt.as_ref().ok_or_else(|| {
+            BamlRtError::BamlRuntime("Function returned no parsed result".to_string())
+        })?;
         let parsed = parsed_result
             .as_ref()
             .map_err(|e| BamlRtError::BamlRuntime(format!("Parsing failed: {}", e)))?;
-        
+
         // Convert ResponseBamlValue to JSON using serialize_partial
-        let json_value = serde_json::to_value(parsed.serialize_partial())
-            .map_err(BamlRtError::Json)?;
-        
+        let json_value =
+            serde_json::to_value(parsed.serialize_partial()).map_err(BamlRtError::Json)?;
+
         // Process trace events to notify LLM interceptors of completion
         // This extracts LLM call information from BAML's trace events
         if let Some(ref collector) = collector {
@@ -199,12 +199,12 @@ impl BamlExecutor {
                 tracing::warn!("Failed to process trace events for LLM interception: {}", e);
             }
         }
-        
+
         Ok(json_value)
     }
 
     /// Execute a BAML function with streaming support
-    /// 
+    ///
     /// Returns a stream of incremental results as the function executes.
     pub fn execute_function_stream(
         &self,
@@ -219,7 +219,7 @@ impl BamlExecutor {
 
         // Convert JSON args to BamlValue map
         let params = self.json_to_baml_map(&args)?;
-        
+
         // Create stream function call
         // Load environment variables for API keys
         let mut env_vars = HashMap::new();
@@ -233,19 +233,21 @@ impl BamlExecutor {
         }
         let tags = None;
         let cancel_tripwire = baml_runtime::TripWire::new(None);
-        
-        let stream = self.runtime.stream_function(
-            function_name.to_string(),
-            &params,
-            &self.ctx_manager,
-            None, // type_builder
-            None, // client_registry
-            None, // collectors
-            env_vars,
-            cancel_tripwire,
-            tags,
-        )
-        .map_err(|e| BamlRtError::BamlRuntime(format!("Failed to create stream: {}", e)))?;
+
+        let stream = self
+            .runtime
+            .stream_function(
+                function_name.to_string(),
+                &params,
+                &self.ctx_manager,
+                None, // type_builder
+                None, // client_registry
+                None, // collectors
+                env_vars,
+                cancel_tripwire,
+                tags,
+            )
+            .map_err(|e| BamlRtError::BamlRuntime(format!("Failed to create stream: {}", e)))?;
 
         Ok(stream)
     }
@@ -257,21 +259,25 @@ impl BamlExecutor {
 
     /// List all available function names from the loaded BAML runtime
     pub fn list_functions(&self) -> Vec<String> {
-        self.runtime.function_names().map(|s| s.to_string()).collect()
+        self.runtime
+            .function_names()
+            .map(|s| s.to_string())
+            .collect()
     }
-    
+
     /// Convert JSON Value to BamlMap<String, BamlValue>
     fn json_to_baml_map(&self, value: &Value) -> Result<baml_types::BamlMap<String, BamlValue>> {
-        let obj = value.as_object()
+        let obj = value
+            .as_object()
             .ok_or_else(|| BamlRtError::InvalidArgument("Expected JSON object".to_string()))?;
-        
+
         let mut map = baml_types::BamlMap::new();
         for (k, v) in obj {
             map.insert(k.clone(), self.json_to_baml_value(v)?);
         }
         Ok(map)
     }
-    
+
     /// Convert JSON Value to BamlValue
     #[allow(clippy::only_used_in_recursion)]
     fn json_to_baml_value(&self, value: &Value) -> Result<BamlValue> {
@@ -283,7 +289,10 @@ impl BamlExecutor {
                 } else if let Some(f) = n.as_f64() {
                     Ok(BamlValue::Float(f))
                 } else {
-                    Err(BamlRtError::TypeConversion(format!("Invalid number: {}", n)))
+                    Err(BamlRtError::TypeConversion(format!(
+                        "Invalid number: {}",
+                        n
+                    )))
                 }
             }
             Value::Bool(b) => Ok(BamlValue::Bool(*b)),
@@ -330,7 +339,9 @@ impl BamlExecutor {
                 Ok(Value::Object(obj))
             }
             BamlValue::Null => Ok(Value::Null),
-            BamlValue::Media(_) => Err(BamlRtError::TypeConversion("Media not supported in JSON conversion".to_string())),
+            BamlValue::Media(_) => Err(BamlRtError::TypeConversion(
+                "Media not supported in JSON conversion".to_string(),
+            )),
             BamlValue::Enum(name, value) => {
                 // Enums are represented as objects with the enum name
                 let mut obj = serde_json::Map::new();

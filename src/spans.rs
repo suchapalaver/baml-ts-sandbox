@@ -3,8 +3,8 @@
 //! This module provides structured span instrumentation following the OTel guide pattern.
 //! All span names use the `baml_rt.` namespace prefix for low cardinality.
 
-use tracing::Span;
 use std::path::Path;
+use tracing::Span;
 
 // Builder operations
 
@@ -115,10 +115,7 @@ pub fn register_baml_functions(function_count: usize) -> Span {
 /// Parent: load_agent_package
 #[inline]
 pub fn evaluate_agent_code(entry_point: &str) -> Span {
-    tracing::debug_span!(
-        "baml_rt.evaluate_agent_code",
-        entry_point = entry_point,
-    )
+    tracing::debug_span!("baml_rt.evaluate_agent_code", entry_point = entry_point,)
 }
 
 /// Create span for invoking an agent function.
@@ -146,10 +143,7 @@ pub fn evaluate_javascript() -> Span {
 /// Parent: invoke_function
 #[inline]
 pub fn invoke_js_function(function_name: &str) -> Span {
-    tracing::debug_span!(
-        "baml_rt.invoke_js_function",
-        function = function_name,
-    )
+    tracing::debug_span!("baml_rt.invoke_js_function", function = function_name,)
 }
 
 /// Create span for BAML function invocation.
@@ -157,10 +151,7 @@ pub fn invoke_js_function(function_name: &str) -> Span {
 /// Parent: invoke_function or invoke_js_function
 #[inline]
 pub fn invoke_baml_function(function_name: &str) -> Span {
-    tracing::debug_span!(
-        "baml_rt.invoke_baml_function",
-        function = function_name,
-    )
+    tracing::debug_span!("baml_rt.invoke_baml_function", function = function_name,)
 }
 
 /// Create span for registering a tool with QuickJS.
@@ -168,10 +159,7 @@ pub fn invoke_baml_function(function_name: &str) -> Span {
 /// Parent: create_js_bridge
 #[inline]
 pub fn register_tool(tool_name: &str) -> Span {
-    tracing::debug_span!(
-        "baml_rt.register_tool",
-        tool = tool_name,
-    )
+    tracing::debug_span!("baml_rt.register_tool", tool = tool_name,)
 }
 
 /// Create span for BAML runtime initialization.
@@ -181,4 +169,3 @@ pub fn register_tool(tool_name: &str) -> Span {
 pub fn init_baml_runtime() -> Span {
     tracing::info_span!("baml_rt.init_baml_runtime")
 }
-

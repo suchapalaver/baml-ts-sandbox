@@ -5,19 +5,17 @@
 //!
 //! Uses OXC for high-performance TypeScript compilation and linting.
 
-use baml_rt::{BamlRtError, Result, spans};
 use baml_rt::builder::{
-    AgentDir, PackagePath, FunctionName, BuildDir,
-    BuilderService, StdFileSystem, OxcLinter,
-    OxcTypeScriptCompiler, RuntimeTypeGenerator, StdPackager,
-    FileSystem, Linter,
+    AgentDir, BuildDir, BuilderService, FileSystem, FunctionName, Linter, OxcLinter,
+    OxcTypeScriptCompiler, PackagePath, RuntimeTypeGenerator, StdFileSystem, StdPackager,
 };
+use baml_rt::{BamlRtError, Result, spans};
 use clap::{Parser, Subcommand};
 use serde_json::Value;
 use std::fs;
 use std::io::{self, BufRead, Write};
-use std::sync::Arc;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "baml-agent-builder")]
@@ -36,7 +34,7 @@ enum Commands {
         #[arg(short, long, default_value = ".")]
         agent_dir: PathBuf,
     },
-    
+
     /// Package an agent into a tar.gz file
     Package {
         /// Agent directory (default: current directory)
@@ -51,7 +49,7 @@ enum Commands {
         #[arg(long)]
         skip_lint: bool,
     },
-    
+
     /// Run an agent package with stdin/stdout connectivity
     Run {
         /// Agent package file path
@@ -73,8 +71,16 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("quickjs_runtime::quickjsrealmadapter=warn".parse().unwrap_or_else(|_| tracing_subscriber::filter::Directive::default()))
-                .add_directive("quickjs_runtime::typescript=warn".parse().unwrap_or_else(|_| tracing_subscriber::filter::Directive::default()))
+                .add_directive(
+                    "quickjs_runtime::quickjsrealmadapter=warn"
+                        .parse()
+                        .unwrap_or_else(|_| tracing_subscriber::filter::Directive::default()),
+                )
+                .add_directive(
+                    "quickjs_runtime::typescript=warn"
+                        .parse()
+                        .unwrap_or_else(|_| tracing_subscriber::filter::Directive::default()),
+                ),
         )
         .init();
 
@@ -99,9 +105,7 @@ async fn main() -> Result<()> {
             args,
         } => {
             let package_path = PackagePath::new(package)?;
-            let function_name = function
-                .map(|s| FunctionName::new(s))
-                .transpose()?;
+            let function_name = function.map(|s| FunctionName::new(s)).transpose()?;
             run_agent(&package_path, function_name.as_ref(), args.as_deref()).await?;
         }
     }
@@ -112,17 +116,13 @@ async fn main() -> Result<()> {
 async fn lint_agent(agent_dir: &AgentDir) -> Result<()> {
     let span = spans::lint_agent(agent_dir.as_path());
     let _guard = span.enter();
-    
+
     let filesystem = StdFileSystem;
     let linter = OxcLinter::new(filesystem);
     linter.lint(agent_dir).await
 }
 
-async fn package_agent(
-    agent_dir: &AgentDir,
-    output: &std::path::Path,
-    lint: bool,
-) -> Result<()> {
+async fn package_agent(agent_dir: &AgentDir, output: &std::path::Path, lint: bool) -> Result<()> {
     let span = spans::package_agent(agent_dir.as_path(), output);
     let _guard = span.enter();
 
@@ -143,17 +143,17 @@ async fn package_agent(
     // Copy baml_src to build directory (runtime loads from baml_src)
     filesystem.copy_dir_all(&agent_dir.baml_src(), &build_dir.join("baml_src"))?;
 
-    let builder_service = BuilderService::new(
-        linter,
-        ts_compiler,
-        type_generator,
-        packager,
-    );
+    let builder_service = BuilderService::new(linter, ts_compiler, type_generator, packager);
 
     // Build the package
-    builder_service.build_package(agent_dir, &build_dir, output, lint).await?;
+    builder_service
+        .build_package(agent_dir, &build_dir, output, lint)
+        .await?;
 
-    println!("\n✅ Agent package built successfully: {}", output.display());
+    println!(
+        "\n✅ Agent package built successfully: {}",
+        output.display()
+    );
     Ok(())
 }
 
@@ -178,10 +178,12 @@ async fn run_agent(
         } else {
             // Read args from stdin
             let mut input = String::new();
-            io::stdin().read_line(&mut input)
+            io::stdin()
+                .read_line(&mut input)
                 .map_err(|e| BamlRtError::Io(e))?;
-            serde_json::from_str(input.trim())
-                .map_err(|e| BamlRtError::InvalidArgument(format!("Invalid JSON from stdin: {}", e)))?
+            serde_json::from_str(input.trim()).map_err(|e| {
+                BamlRtError::InvalidArgument(format!("Invalid JSON from stdin: {}", e))
+            })?
         };
 
         let invoke_span = spans::invoke_function("agent", function_name.as_str());
@@ -278,11 +280,13 @@ async fn load_agent_package(package_path: &std::path::Path) -> Result<LoadedAgen
     // Extract package
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| BamlRtError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("Failed to get system time: {}", e)
-        )))?;
-    
+        .map_err(|e| {
+            BamlRtError::Io(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("Failed to get system time: {}", e),
+            ))
+        })?;
+
     let extract_dir = std::env::temp_dir().join(format!("baml-agent-{}", timestamp.as_secs()));
     fs::create_dir_all(&extract_dir).map_err(BamlRtError::Io)?;
 
@@ -294,14 +298,19 @@ async fn load_agent_package(package_path: &std::path::Path) -> Result<LoadedAgen
     // Load manifest
     let manifest_path = extract_dir.join("manifest.json");
     let manifest_content = fs::read_to_string(&manifest_path).map_err(BamlRtError::Io)?;
-    let manifest_json: Value = serde_json::from_str(&manifest_content).map_err(BamlRtError::Json)?;
+    let manifest_json: Value =
+        serde_json::from_str(&manifest_content).map_err(BamlRtError::Json)?;
 
-    let name = manifest_json.get("name")
+    let name = manifest_json
+        .get("name")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| BamlRtError::InvalidArgument("manifest.json missing 'name' field".to_string()))?
+        .ok_or_else(|| {
+            BamlRtError::InvalidArgument("manifest.json missing 'name' field".to_string())
+        })?
         .to_string();
 
-    let entry_point = manifest_json.get("entry_point")
+    let entry_point = manifest_json
+        .get("entry_point")
         .and_then(|v| v.as_str())
         .map(String::from)
         .unwrap_or_else(|| "dist/index.js".to_string());
@@ -311,10 +320,12 @@ async fn load_agent_package(package_path: &std::path::Path) -> Result<LoadedAgen
     let runtime_manager = {
         let schema_span = spans::load_baml_schema(&baml_src);
         let _schema_guard = schema_span.enter();
-        let baml_src_str = baml_src.to_str()
-            .ok_or_else(|| BamlRtError::InvalidArgument(
-                format!("BAML source path contains invalid UTF-8: {}", baml_src.display())
-            ))?;
+        let baml_src_str = baml_src.to_str().ok_or_else(|| {
+            BamlRtError::InvalidArgument(format!(
+                "BAML source path contains invalid UTF-8: {}",
+                baml_src.display()
+            ))
+        })?;
         let mut rm = baml_rt::baml::BamlRuntimeManager::new()?;
         rm.load_schema(baml_src_str)?;
         rm
@@ -365,14 +376,18 @@ mod tests {
             .join("fixtures")
             .join("agents")
             .join("complex-agent");
-        
+
         let mut runtime_manager = BamlRuntimeManager::new().unwrap();
-        runtime_manager.load_schema(agent_dir.to_str().unwrap()).unwrap();
-        
+        runtime_manager
+            .load_schema(agent_dir.to_str().unwrap())
+            .unwrap();
+
         let runtime_manager_arc = Arc::new(Mutex::new(runtime_manager));
-        let mut js_bridge = QuickJSBridge::new(runtime_manager_arc.clone()).await.unwrap();
+        let mut js_bridge = QuickJSBridge::new(runtime_manager_arc.clone())
+            .await
+            .unwrap();
         js_bridge.register_baml_functions().await.unwrap();
-        
+
         // Load agent code
         let agent_code = r#"
             async function greetUser(name) {
@@ -381,7 +396,7 @@ mod tests {
             globalThis.greetUser = greetUser;
         "#;
         let _ = js_bridge.evaluate(agent_code).await;
-        
+
         LoadedAgent {
             name: "test-agent".to_string(),
             js_bridge: Arc::new(Mutex::new(js_bridge)),
@@ -392,10 +407,10 @@ mod tests {
     async fn test_invoke_function_returns_actual_result() {
         // Contract: invoke_function must return the actual result, not {"success": true}
         let agent = create_test_agent().await;
-        
+
         let args = json!({"name": "ContractTest"});
         let result = agent.invoke_function("greetUser", args).await;
-        
+
         match result {
             Ok(val) => {
                 // CONTRACT: Result can be a string (success) or an object with "error" (failure)
@@ -403,18 +418,22 @@ mod tests {
                 if let Some(obj) = val.as_object() {
                     // Check if it's an error object (acceptable) or success wrapper (not acceptable)
                     if obj.contains_key("success") {
-                        panic!("CONTRACT VIOLATION: Result is object with 'success': {:?}. Must return actual result.", obj);
+                        panic!(
+                            "CONTRACT VIOLATION: Result is object with 'success': {:?}. Must return actual result.",
+                            obj
+                        );
                     }
                     // Error objects are acceptable for API key errors
                     if let Some(error_msg) = obj.get("error").and_then(|v| v.as_str()) {
-                        if error_msg.contains("InvalidAuthentication") || error_msg.contains("401") {
+                        if error_msg.contains("InvalidAuthentication") || error_msg.contains("401")
+                        {
                             println!("Test passed (with expected API key error): {}", error_msg);
                             return; // Acceptable error case
                         }
                     }
                     panic!("CONTRACT VIOLATION: Result is unexpected object: {:?}", obj);
                 }
-                
+
                 // Must be a string result
                 let greeting = val.as_str().expect("Expected string result");
                 // Accept API key errors (they prove function was called)
@@ -438,4 +457,3 @@ mod tests {
         }
     }
 }
-

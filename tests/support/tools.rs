@@ -3,10 +3,10 @@
 //! These tools implement the BamlTool trait and are used in tests
 //! to verify tool registration, execution, and integration.
 
-use baml_rt::tools::BamlTool;
-use serde_json::{json, Value};
-use baml_rt::error::Result;
 use async_trait::async_trait;
+use baml_rt::error::Result;
+use baml_rt::tools::BamlTool;
+use serde_json::{Value, json};
 
 /// Example weather tool
 pub struct WeatherTool;
@@ -14,11 +14,11 @@ pub struct WeatherTool;
 #[async_trait]
 impl BamlTool for WeatherTool {
     const NAME: &'static str = "get_weather";
-    
+
     fn description(&self) -> &'static str {
         "Gets the current weather for a specific location. Returns temperature, condition, and humidity."
     }
-    
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -31,15 +31,16 @@ impl BamlTool for WeatherTool {
             "required": ["location"]
         })
     }
-    
+
     async fn execute(&self, args: Value) -> Result<Value> {
         let obj = args.as_object().expect("Expected object");
-        let location = obj.get("location")
+        let location = obj
+            .get("location")
             .and_then(|v| v.as_str())
             .expect("Expected 'location' string");
-        
+
         tracing::info!(location = location, "WeatherTool executed");
-        
+
         // Return mock weather data
         Ok(json!({
             "location": location,
@@ -59,11 +60,11 @@ pub struct CalculatorTool;
 #[async_trait]
 impl BamlTool for CalculatorTool {
     const NAME: &'static str = "calculate";
-    
+
     fn description(&self) -> &'static str {
         "Performs mathematical calculations. Can handle addition, subtraction, multiplication, and division."
     }
-    
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -76,36 +77,37 @@ impl BamlTool for CalculatorTool {
             "required": ["expression"]
         })
     }
-    
+
     async fn execute(&self, args: Value) -> Result<Value> {
         let obj = args.as_object().expect("Expected object");
-        let expr = obj.get("expression")
+        let expr = obj
+            .get("expression")
             .and_then(|v| v.as_str())
             .expect("Expected 'expression' string");
-        
+
         tracing::info!(expression = expr, "CalculatorTool executed");
-        
+
         // Simple calculator implementation
         let result = if let Some(pos) = expr.find('+') {
             let a: f64 = expr[..pos].trim().parse().unwrap_or(0.0);
-            let b: f64 = expr[pos+1..].trim().parse().unwrap_or(0.0);
+            let b: f64 = expr[pos + 1..].trim().parse().unwrap_or(0.0);
             a + b
         } else if let Some(pos) = expr.find('-') {
             let a: f64 = expr[..pos].trim().parse().unwrap_or(0.0);
-            let b: f64 = expr[pos+1..].trim().parse().unwrap_or(0.0);
+            let b: f64 = expr[pos + 1..].trim().parse().unwrap_or(0.0);
             a - b
         } else if let Some(pos) = expr.find('*') {
             let a: f64 = expr[..pos].trim().parse().unwrap_or(0.0);
-            let b: f64 = expr[pos+1..].trim().parse().unwrap_or(0.0);
+            let b: f64 = expr[pos + 1..].trim().parse().unwrap_or(0.0);
             a * b
         } else if let Some(pos) = expr.find('/') {
             let a: f64 = expr[..pos].trim().parse().unwrap_or(0.0);
-            let b: f64 = expr[pos+1..].trim().parse().unwrap_or(0.0);
+            let b: f64 = expr[pos + 1..].trim().parse().unwrap_or(0.0);
             if b != 0.0 { a / b } else { 0.0 }
         } else {
             0.0
         };
-        
+
         Ok(json!({
             "expression": expr,
             "result": result,
@@ -120,11 +122,11 @@ pub struct UppercaseTool;
 #[async_trait]
 impl BamlTool for UppercaseTool {
     const NAME: &'static str = "uppercase";
-    
+
     fn description(&self) -> &'static str {
         "Converts a string to uppercase"
     }
-    
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -134,7 +136,7 @@ impl BamlTool for UppercaseTool {
             "required": ["text"]
         })
     }
-    
+
     async fn execute(&self, args: Value) -> Result<Value> {
         let obj = args.as_object().expect("Expected object");
         let text = obj.get("text").and_then(|v| v.as_str()).unwrap_or("");
@@ -148,11 +150,11 @@ pub struct DelayedResponseTool;
 #[async_trait]
 impl BamlTool for DelayedResponseTool {
     const NAME: &'static str = "delayed_response";
-    
+
     fn description(&self) -> &'static str {
         "Returns a response after a short delay (simulates async operation)"
     }
-    
+
     fn input_schema(&self) -> Value {
         json!({
             "type": "object",
@@ -162,20 +164,19 @@ impl BamlTool for DelayedResponseTool {
             "required": ["message"]
         })
     }
-    
+
     async fn execute(&self, args: Value) -> Result<Value> {
-        use tokio::time::{sleep, Duration};
-        
+        use tokio::time::{Duration, sleep};
+
         let obj = args.as_object().expect("Expected object");
         let message = obj.get("message").and_then(|v| v.as_str()).unwrap_or("");
-        
+
         // Simulate async work
         sleep(Duration::from_millis(50)).await;
-        
+
         Ok(json!({
             "response": format!("Delayed: {}", message),
             "timestamp": format!("{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs())
         }))
     }
 }
-

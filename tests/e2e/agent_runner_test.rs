@@ -2,22 +2,27 @@
 
 use baml_rt::baml::BamlRuntimeManager;
 use dotenvy;
-use std::path::Path;
-use std::fs;
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use std::fs;
+use std::path::Path;
 use tar::Builder;
 
 fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Create temporary directory for package contents
-    let temp_dir = std::env::temp_dir().join(format!("test-agent-{}", std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).unwrap().as_secs()));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "test-agent-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    ));
     fs::create_dir_all(&temp_dir)?;
 
     // Create baml_src directory with a simple BAML file
     let baml_src = temp_dir.join("baml_src");
     fs::create_dir_all(&baml_src)?;
-    
+
     // Copy existing BAML files from project if available
     let project_baml_src = Path::new("baml_src");
     if project_baml_src.exists() {
@@ -42,7 +47,10 @@ fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::erro
         "entry_point": "dist/index.js",
         "runtime_version": "0.1.0"
     });
-    fs::write(temp_dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?)?;
+    fs::write(
+        temp_dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest)?,
+    )?;
 
     // Create tar.gz
     let tar_gz = fs::File::create(output_path)?;
@@ -76,7 +84,7 @@ async fn test_agent_package_loading() {
 
     // Create a test agent package
     let package_path = std::env::temp_dir().join("test-agent-package.tar.gz");
-    
+
     match create_test_agent_package(&package_path) {
         Ok(_) => {
             println!("Created test agent package: {}", package_path.display());
@@ -95,14 +103,17 @@ async fn test_agent_package_loading() {
     let tar_gz = fs::File::open(&package_path).unwrap();
     let tar = flate2::read::GzDecoder::new(tar_gz);
     let mut archive = tar::Archive::new(tar);
-    
+
     let extract_dir = std::env::temp_dir().join("test-agent-extract");
     fs::create_dir_all(&extract_dir).unwrap();
     archive.unpack(&extract_dir).unwrap();
 
     // Verify manifest exists
     let manifest_path = extract_dir.join("manifest.json");
-    assert!(manifest_path.exists(), "manifest.json should exist in package");
+    assert!(
+        manifest_path.exists(),
+        "manifest.json should exist in package"
+    );
 
     // Verify baml_src exists
     let baml_src = extract_dir.join("baml_src");
@@ -117,7 +128,7 @@ async fn test_agent_package_loading() {
 async fn test_runtime_manager_loads_schema() {
     // Test that BamlRuntimeManager can load a schema
     // This is the core functionality needed for agent loading
-    
+
     let baml_src_path = Path::new("baml_src");
     if !baml_src_path.exists() {
         println!("Skipping test: baml_src directory not found");
@@ -126,7 +137,7 @@ async fn test_runtime_manager_loads_schema() {
 
     let mut manager = BamlRuntimeManager::new().unwrap();
     let result = manager.load_schema("baml_src");
-    
+
     match result {
         Ok(_) => {
             assert!(manager.is_schema_loaded(), "Schema should be loaded");

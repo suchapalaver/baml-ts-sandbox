@@ -9,7 +9,7 @@ use crate::interceptor::{
 };
 use async_trait::async_trait;
 use serde_json::Value;
-use tracing::{error, info, span, Level};
+use tracing::{Level, error, info, span};
 
 /// Tracing interceptor for LLM calls
 ///
@@ -200,7 +200,9 @@ impl LLMInterceptor for TracingInterceptor {
         result: &Result<Value>,
         duration_ms: u64,
     ) {
-        self.llm.on_llm_call_complete(context, result, duration_ms).await;
+        self.llm
+            .on_llm_call_complete(context, result, duration_ms)
+            .await;
     }
 }
 
@@ -217,7 +219,8 @@ impl ToolInterceptor for TracingInterceptor {
         result: &Result<Value>,
         duration_ms: u64,
     ) {
-        self.tool.on_tool_call_complete(context, result, duration_ms).await;
+        self.tool
+            .on_tool_call_complete(context, result, duration_ms)
+            .await;
     }
 }
-

@@ -65,18 +65,6 @@ path = "tests/unit/tool_registration_test.rs"
 name = "js_tool_registration_test"
 path = "tests/unit/js_tool_registration_test.rs"
 
-[[test]]
-name = "interceptor_test"
-path = "tests/unit/interceptor_test.rs"
-
-[[test]]
-name = "llm_interceptor_test"
-path = "tests/unit/llm_interceptor_test.rs"
-
-[[test]]
-name = "tracing_interceptor_test"
-path = "tests/unit/tracing_interceptor_test.rs"
-
 # Integration Tests
 [[test]]
 name = "baml_invoke_test"

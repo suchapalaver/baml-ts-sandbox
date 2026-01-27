@@ -12,8 +12,8 @@ pub mod support {
 pub use support::tools::*;
 
 // Fixture helpers
-use std::path::{Path, PathBuf};
 use baml_rt::error::{BamlRtError, Result};
+use std::path::{Path, PathBuf};
 
 pub fn fixture_path(relative_path: &str) -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
@@ -37,11 +37,12 @@ pub fn package_fixture(name: &str) -> PathBuf {
 
 pub fn load_baml_fixture(name: &str) -> Result<String> {
     let path = baml_fixture(name);
-    std::fs::read_to_string(&path)
-        .map_err(|e| BamlRtError::Io(std::io::Error::new(
+    std::fs::read_to_string(&path).map_err(|e| {
+        BamlRtError::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
-            format!("Failed to load BAML fixture {}: {}", name, e)
-        )))
+            format!("Failed to load BAML fixture {}: {}", name, e),
+        ))
+    })
 }
 
 pub fn fixture_exists(relative_path: &str) -> bool {

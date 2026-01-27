@@ -1,7 +1,7 @@
 //! File system operations implementation
 
-use crate::error::{BamlRtError, Result};
 use crate::builder::traits::FileSystem;
+use crate::error::{BamlRtError, Result};
 use std::fs;
 use std::path::Path;
 
@@ -70,4 +70,3 @@ impl FileSystem for StdFileSystem {
         Ok(())
     }
 }
-

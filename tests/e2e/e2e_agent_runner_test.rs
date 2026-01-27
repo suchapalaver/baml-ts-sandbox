@@ -1,11 +1,11 @@
 //! End-to-end tests for agent runner binary
 
-use std::path::{Path, PathBuf};
 use dotenvy;
-use std::process::Command;
-use std::fs;
 use flate2::Compression;
 use flate2::write::GzEncoder;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use tar::Builder;
 
 /// Create a test agent package from a fixture agent
@@ -49,7 +49,10 @@ fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::erro
         "entry_point": "dist/index.js",
         "runtime_version": "0.1.0"
     });
-    fs::write(temp_dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?)?;
+    fs::write(
+        temp_dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest)?,
+    )?;
 
     // Create tar.gz
     if let Some(parent) = output_path.parent() {
@@ -85,12 +88,10 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>
 
 #[tokio::test]
 async fn test_e2e_agent_runner_load_package() {
-
     // Create a test agent package
     let package_path = std::env::temp_dir().join("e2e-test-agent-package.tar.gz");
 
-    create_test_agent_package(&package_path)
-        .expect("Failed to create test agent package");
+    create_test_agent_package(&package_path).expect("Failed to create test agent package");
 
     assert!(package_path.exists(), "Test package should exist");
 
@@ -121,7 +122,6 @@ async fn test_e2e_agent_runner_load_package() {
 
 #[tokio::test]
 async fn test_e2e_agent_runner_invoke_function() {
-
     // Skip if no API key (we'll get auth errors, but that's okay for structure testing)
     let _ = dotenvy::dotenv();
     let has_api_key = std::env::var("OPENROUTER_API_KEY").is_ok();
@@ -129,8 +129,7 @@ async fn test_e2e_agent_runner_invoke_function() {
     // Create a test agent package
     let package_path = std::env::temp_dir().join("e2e-test-agent-invoke.tar.gz");
 
-    create_test_agent_package(&package_path)
-        .expect("Failed to create test agent package");
+    create_test_agent_package(&package_path).expect("Failed to create test agent package");
 
     // Try to invoke a function (will fail without API key, but should parse correctly)
     let mut cmd = Command::new("./target/debug/baml-agent-runner");
@@ -150,7 +149,7 @@ async fn test_e2e_agent_runner_invoke_function() {
 
     // Even if it fails due to missing API key, the structure should work
     // (i.e., it should load the package and attempt to invoke, not fail on parsing)
-    let is_auth_error = stderr.contains("API key") 
+    let is_auth_error = stderr.contains("API key")
         || stderr.contains("authentication")
         || stderr.contains("401")
         || stdout.contains("error");
@@ -160,8 +159,10 @@ async fn test_e2e_agent_runner_invoke_function() {
         println!("Expected authentication error (no API key provided)");
     } else if output.status.success() {
         // Success: Function was invoked
-        assert!(stdout.contains("{") || stdout.contains("result"), 
-                "Should return JSON result");
+        assert!(
+            stdout.contains("{") || stdout.contains("result"),
+            "Should return JSON result"
+        );
     } else {
         // Other errors might be acceptable if they're not parsing/loading errors
         println!("Function invocation returned non-zero exit code, but may be expected");
@@ -170,4 +171,3 @@ async fn test_e2e_agent_runner_invoke_function() {
     // Cleanup
     fs::remove_file(&package_path).ok();
 }
-
