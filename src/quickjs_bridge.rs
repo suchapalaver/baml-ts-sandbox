@@ -834,103 +834,32 @@ impl QuickJSBridge {
         // Check if it's a JsPromise - poll for the result via __eval_result
         if js_result.is_js_promise() {
             tracing::debug!("Result is a JsPromise, polling for __eval_result");
-            return self.poll_promise_via_js(js_result).await;
+            return self.poll_for_eval_result().await;
         }
 
         // For other promise types (JsValueFacade::Promise from Rust), fall back to polling
         let debug_str = format!("{:?}", js_result);
         if debug_str.contains("Promise") {
             tracing::debug!(debug_str = %debug_str, "Result is a Rust-created Promise, entering polling loop");
-
-            let poll_span = tracing::trace_span!("baml_rt.poll_promise_resolution");
-            let _poll_guard = poll_span.enter();
-            let mut attempts = 0;
-            const MAX_ATTEMPTS: u32 = 10000;
-
-            loop {
-                // Check if result is available via global variable
-                let check_code = r#"
-                    (function() {
-                        if (typeof globalThis.__eval_result !== 'undefined') {
-                            return globalThis.__eval_result;
-                        }
-                        return null;
-                    })()
-                "#;
-                let check_script = Script::new("check_result.js", check_code);
-                let check_result =
-                    self.runtime.eval(None, check_script).await.map_err(|e| {
-                        BamlRtError::QuickJs(format!("Failed to check result: {}", e))
-                    })?;
-
-                if check_result.is_string() {
-                    let result_str = check_result.get_str();
-                    // Clean up the global
-                    let _ = self
-                        .runtime
-                        .eval(
-                            None,
-                            Script::new("cleanup.js", "delete globalThis.__eval_result"),
-                        )
-                        .await;
-                    tracing::trace!(attempts = attempts, "Promise resolved via polling");
-                    return serde_json::from_str(result_str).map_err(BamlRtError::Json);
-                }
-
-                // Run pending jobs - this processes promise continuations in QuickJS
-                self.runtime
-                    .add_rt_task_to_event_loop(|rt| {
-                        rt.run_pending_jobs_if_any();
-                    })
-                    .await;
-
-                // Yield to allow the helper thread's tokio tasks to progress
-                tokio::task::yield_now().await;
-                tokio::time::sleep(Duration::from_millis(1)).await;
-
-                attempts += 1;
-                if attempts % 1000 == 0 {
-                    tracing::debug!(attempts = attempts, "Still polling for promise resolution");
-                }
-                if attempts >= MAX_ATTEMPTS {
-                    let _ = self
-                        .runtime
-                        .eval(
-                            None,
-                            Script::new("cleanup.js", "delete globalThis.__eval_result"),
-                        )
-                        .await;
-                    return Err(BamlRtError::QuickJs(format!(
-                        "Promise did not resolve after {} attempts ({}ms)",
-                        MAX_ATTEMPTS, MAX_ATTEMPTS
-                    )));
-                }
-            }
+            return self.poll_for_eval_result().await;
         }
 
         // Not a promise - wrap in success object
         Ok(serde_json::json!({ "success": true, "result": debug_str }))
     }
 
-    /// Poll a JavaScript promise by storing it and attaching .then()/.catch() via JavaScript
+    /// Poll for __eval_result to be set by async JavaScript code
     ///
-    /// This is a workaround for quickjs_runtime's get_promise_result() not correctly
-    /// receiving the resolved value. We use JavaScript's native Promise handling instead.
-    async fn poll_promise_via_js(&mut self, _promise: &JsValueFacade) -> Result<Value> {
-        // Store the pending promise and attach handlers via JavaScript
-        // The key insight is that we need to use JavaScript's .then() mechanism
-        // rather than the Rust-side promise reaction mechanism
+    /// This is the core polling mechanism for promise resolution. It repeatedly checks
+    /// if `globalThis.__eval_result` has been set by the async IIFE wrapper, running
+    /// pending QuickJS jobs between checks to allow promise continuations to execute.
+    ///
+    /// This is a workaround for quickjs_runtime's `get_promise_result()` not correctly
+    /// receiving the resolved value from promises created via `JsValueFacade::new_promise()`.
+    async fn poll_for_eval_result(&mut self) -> Result<Value> {
+        let poll_span = tracing::trace_span!("baml_rt.poll_promise_resolution");
+        let _poll_guard = poll_span.enter();
 
-        // First, store the promise in a global variable
-        // We can't directly pass the JsValueFacade, so we need a different approach
-
-        // The promise is the return value of eval(). We need to re-evaluate
-        // with a wrapper that handles the promise properly.
-
-        // Alternative: Use the polling approach with __eval_result but make sure
-        // the async code actually sets __eval_result
-
-        // For now, fall back to the polling mechanism
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 10000;
 
@@ -961,7 +890,7 @@ impl QuickJSBridge {
                         Script::new("cleanup.js", "delete globalThis.__eval_result"),
                     )
                     .await;
-                tracing::trace!(attempts = attempts, "Promise resolved via JS polling");
+                tracing::trace!(attempts = attempts, "Promise resolved via polling");
                 return serde_json::from_str(result_str).map_err(BamlRtError::Json);
             }
 
@@ -978,10 +907,7 @@ impl QuickJSBridge {
 
             attempts += 1;
             if attempts % 1000 == 0 {
-                tracing::debug!(
-                    attempts = attempts,
-                    "Still polling for JS promise resolution"
-                );
+                tracing::debug!(attempts = attempts, "Still polling for promise resolution");
             }
             if attempts >= MAX_ATTEMPTS {
                 let _ = self
