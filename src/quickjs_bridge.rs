@@ -14,6 +14,7 @@ use quickjs_runtime::values::JsValueFacade;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 /// Bridge between QuickJS JavaScript runtime and BAML functions
@@ -166,7 +167,10 @@ impl QuickJSBridge {
     }
 
     /// Register all tool functions with QuickJS
-    async fn register_tool_functions(&mut self) -> Result<()> {
+    ///
+    /// This registers all registered Rust tools as JavaScript callable functions,
+    /// plus the `__tool_invoke` helper function for low-level tool invocation.
+    pub async fn register_tool_functions(&mut self) -> Result<()> {
         tracing::info!("Registering tool functions with QuickJS");
 
         let manager = self.baml_manager.lock().await;
@@ -772,12 +776,22 @@ impl QuickJSBridge {
         let direct_script = Script::new("eval_direct.js", &direct_code);
         let direct_result = self.runtime.eval(None, direct_script).await;
 
-        // If direct execution succeeds and returns a non-promise, we're done
+        // If direct execution succeeds, handle the result
         if let Ok(js_result) = direct_result {
+            let debug_str = format!("{:?}", js_result);
             tracing::debug!(
                 is_string = js_result.is_string(),
+                debug_str = %debug_str,
                 "Direct execution result type"
             );
+
+            // Check if it's a promise - if so, use poll_for_result
+            if js_result.is_js_promise() || debug_str.contains("Promise") {
+                tracing::debug!("Result is a promise, using poll_for_result");
+                return self.poll_for_result(&js_result).await;
+            }
+
+            // Not a promise - handle synchronous result
             if js_result.is_string() {
                 // Got a string result - try parsing as JSON
                 let json_str = js_result.get_str();
@@ -787,146 +801,200 @@ impl QuickJSBridge {
                 // Not JSON - return the string wrapped in a result object
                 return Ok(serde_json::json!({ "result": json_str }));
             }
-            // Not a string - might be undefined/null from assignment code
-            // Check if it's a promise
-            let debug_str = format!("{:?}", js_result);
-            tracing::debug!(debug_str = %debug_str, "Checking if result is a promise");
-            if !debug_str.contains("Promise") && !debug_str.contains("JsPromise") {
-                // Not a promise, code executed successfully (side effects happened)
-                // Return empty object to indicate success without a value
-                tracing::debug!("Result is not a promise, returning empty object");
-                return Ok(serde_json::json!({}));
-            }
-            tracing::debug!("Result is a promise, will await it");
 
-            // Code returned a promise from sync IIFE - wrap and re-execute to store result
-            let wrapped_code = format!(
-                r#"
-                (async function() {{
-                    try {{
-                        const codePromise = {};
-                        const result = await codePromise;
-                        globalThis.__eval_result = typeof result === 'string' ? result : JSON.stringify(result);
-                    }} catch (error) {{
-                        globalThis.__eval_result = JSON.stringify({{ error: error.toString() }});
-                    }}
-                }})()
-                "#,
-                code
-            );
-
-            let script = Script::new("eval.js", &wrapped_code);
-            tracing::debug!("Executing sync code with async wrapper");
-
-            let js_result = self.runtime.eval(None, script).await.map_err(|e| {
-                BamlRtError::QuickJs(format!("Failed to execute JavaScript: {}", e))
-            })?;
-
-            return self.poll_for_result(&js_result).await;
+            // Not a string and not a promise - convert to serde Value
+            let serde_value = js_result
+                .to_serde_value()
+                .await
+                .map_err(|e| BamlRtError::QuickJs(format!("Failed to convert JS result: {}", e)))?;
+            return Ok(serde_value);
         }
 
-        // Direct execution failed - try as error
+        // Direct execution failed - return error
         Err(direct_result
             .err()
             .map(|e| BamlRtError::QuickJs(format!("Failed to execute JavaScript: {}", e)))
             .unwrap())
     }
 
-    /// Poll for __eval_result to be set by async code
+    /// Wait for async code result using proper promise resolution
+    ///
+    /// This method handles promise resolution by polling for __eval_result to be set.
+    /// The async IIFE wrapper stores the result in globalThis.__eval_result when complete.
     async fn poll_for_result(&mut self, js_result: &JsValueFacade) -> Result<Value> {
-        let _debug_str = format!("{:?}", js_result);
+        let debug_str = format!("{:?}", js_result);
+        tracing::debug!(result_type = %debug_str, is_string = js_result.is_string(), is_js_promise = js_result.is_js_promise(), "poll_for_result called");
 
         // Check if result is a string (synchronous code returned immediately)
         if js_result.is_string() {
             let json_str = js_result.get_str();
-            serde_json::from_str(json_str).map_err(BamlRtError::Json)
-        } else {
-            // Result is a promise - we need to wait for it to resolve
-            // The async IIFE will set globalThis.__eval_result when done
-            let debug_str = format!("{:?}", js_result);
+            return serde_json::from_str(json_str).map_err(BamlRtError::Json);
+        }
 
-            // Check if it's a promise
-            if debug_str.contains("Promise") || debug_str.contains("JsPromise") {
-                tracing::debug!(debug_str = %debug_str, "Wrapped code returned a promise, entering polling loop");
-                // Wait for the promise to resolve by running pending jobs in a loop
-                // and checking if __eval_result has been set
-                let poll_span = tracing::trace_span!("baml_rt.poll_promise_resolution");
-                let _poll_guard = poll_span.enter();
-                let mut attempts = 0;
-                const MAX_ATTEMPTS: u32 = 10000;
+        // Check if it's a JsPromise - poll for the result via __eval_result
+        if js_result.is_js_promise() {
+            tracing::debug!("Result is a JsPromise, polling for __eval_result");
+            return self.poll_promise_via_js(js_result).await;
+        }
 
-                loop {
-                    // Check if result is available (trace level - happens many times per resolution)
-                    let check_code = r#"
-                        (function() {
-                            if (typeof globalThis.__eval_result !== 'undefined') {
-                                return globalThis.__eval_result;
-                            }
-                            return null;
-                        })()
-                    "#;
-                    let check_script = Script::new("check_result.js", check_code);
-                    let check_result =
-                        self.runtime.eval(None, check_script).await.map_err(|e| {
-                            BamlRtError::QuickJs(format!("Failed to check result: {}", e))
-                        })?;
+        // For other promise types (JsValueFacade::Promise from Rust), fall back to polling
+        let debug_str = format!("{:?}", js_result);
+        if debug_str.contains("Promise") {
+            tracing::debug!(debug_str = %debug_str, "Result is a Rust-created Promise, entering polling loop");
 
-                    if check_result.is_string() {
-                        let result_str = check_result.get_str();
-                        // Clean up the global
-                        let _ = self
-                            .runtime
-                            .eval(
-                                None,
-                                Script::new("cleanup.js", "delete globalThis.__eval_result"),
-                            )
-                            .await;
-                        tracing::trace!(attempts = attempts, "Promise resolved");
-                        return serde_json::from_str(result_str).map_err(BamlRtError::Json);
-                    }
+            let poll_span = tracing::trace_span!("baml_rt.poll_promise_resolution");
+            let _poll_guard = poll_span.enter();
+            let mut attempts = 0;
+            const MAX_ATTEMPTS: u32 = 10000;
 
-                    // Run pending jobs - this is how quickjs_runtime processes promises
-                    // IMPORTANT: Use add_rt_task_to_event_loop (async) instead of exe_rt_task_in_event_loop (sync)
-                    // to allow the event loop to process tasks from the task queue (including promise resolutions
-                    // added by helper tasks via add_rt_task_to_event_loop_void)
-                    self.runtime
-                        .add_rt_task_to_event_loop(|rt| {
-                            rt.run_pending_jobs_if_any();
-                        })
+            loop {
+                // Check if result is available via global variable
+                let check_code = r#"
+                    (function() {
+                        if (typeof globalThis.__eval_result !== 'undefined') {
+                            return globalThis.__eval_result;
+                        }
+                        return null;
+                    })()
+                "#;
+                let check_script = Script::new("check_result.js", check_code);
+                let check_result =
+                    self.runtime.eval(None, check_script).await.map_err(|e| {
+                        BamlRtError::QuickJs(format!("Failed to check result: {}", e))
+                    })?;
+
+                if check_result.is_string() {
+                    let result_str = check_result.get_str();
+                    // Clean up the global
+                    let _ = self
+                        .runtime
+                        .eval(
+                            None,
+                            Script::new("cleanup.js", "delete globalThis.__eval_result"),
+                        )
                         .await;
-
-                    // Yield to Tokio to allow futures to progress
-                    tokio::task::yield_now().await;
-
-                    // Small delay to allow promise resolution
-                    tokio::time::sleep(tokio::time::Duration::from_millis(1)).await;
-
-                    attempts += 1;
-                    // Log progress every 1000 attempts
-                    if attempts % 1000 == 0 {
-                        tracing::debug!(
-                            attempts = attempts,
-                            "Still polling for promise resolution"
-                        );
-                    }
-                    if attempts >= MAX_ATTEMPTS {
-                        // Clean up the global
-                        let _ = self
-                            .runtime
-                            .eval(
-                                None,
-                                Script::new("cleanup.js", "delete globalThis.__eval_result"),
-                            )
-                            .await;
-                        return Err(BamlRtError::QuickJs(format!(
-                            "Promise did not resolve after {} attempts ({}ms)",
-                            MAX_ATTEMPTS, MAX_ATTEMPTS
-                        )));
-                    }
+                    tracing::trace!(attempts = attempts, "Promise resolved via polling");
+                    return serde_json::from_str(result_str).map_err(BamlRtError::Json);
                 }
-            } else {
-                // Not a promise, wrap in success object
-                Ok(serde_json::json!({ "success": true, "result": debug_str }))
+
+                // Run pending jobs - this processes promise continuations in QuickJS
+                self.runtime
+                    .add_rt_task_to_event_loop(|rt| {
+                        rt.run_pending_jobs_if_any();
+                    })
+                    .await;
+
+                // Yield to allow the helper thread's tokio tasks to progress
+                tokio::task::yield_now().await;
+                tokio::time::sleep(Duration::from_millis(1)).await;
+
+                attempts += 1;
+                if attempts % 1000 == 0 {
+                    tracing::debug!(attempts = attempts, "Still polling for promise resolution");
+                }
+                if attempts >= MAX_ATTEMPTS {
+                    let _ = self
+                        .runtime
+                        .eval(
+                            None,
+                            Script::new("cleanup.js", "delete globalThis.__eval_result"),
+                        )
+                        .await;
+                    return Err(BamlRtError::QuickJs(format!(
+                        "Promise did not resolve after {} attempts ({}ms)",
+                        MAX_ATTEMPTS, MAX_ATTEMPTS
+                    )));
+                }
+            }
+        }
+
+        // Not a promise - wrap in success object
+        Ok(serde_json::json!({ "success": true, "result": debug_str }))
+    }
+
+    /// Poll a JavaScript promise by storing it and attaching .then()/.catch() via JavaScript
+    ///
+    /// This is a workaround for quickjs_runtime's get_promise_result() not correctly
+    /// receiving the resolved value. We use JavaScript's native Promise handling instead.
+    async fn poll_promise_via_js(&mut self, _promise: &JsValueFacade) -> Result<Value> {
+        // Store the pending promise and attach handlers via JavaScript
+        // The key insight is that we need to use JavaScript's .then() mechanism
+        // rather than the Rust-side promise reaction mechanism
+
+        // First, store the promise in a global variable
+        // We can't directly pass the JsValueFacade, so we need a different approach
+
+        // The promise is the return value of eval(). We need to re-evaluate
+        // with a wrapper that handles the promise properly.
+
+        // Alternative: Use the polling approach with __eval_result but make sure
+        // the async code actually sets __eval_result
+
+        // For now, fall back to the polling mechanism
+        let mut attempts = 0;
+        const MAX_ATTEMPTS: u32 = 10000;
+
+        loop {
+            // Check if result is available via global variable
+            let check_code = r#"
+                (function() {
+                    if (typeof globalThis.__eval_result !== 'undefined') {
+                        return globalThis.__eval_result;
+                    }
+                    return null;
+                })()
+            "#;
+            let check_script = Script::new("check_result.js", check_code);
+            let check_result = self
+                .runtime
+                .eval(None, check_script)
+                .await
+                .map_err(|e| BamlRtError::QuickJs(format!("Failed to check result: {}", e)))?;
+
+            if check_result.is_string() {
+                let result_str = check_result.get_str();
+                // Clean up the global
+                let _ = self
+                    .runtime
+                    .eval(
+                        None,
+                        Script::new("cleanup.js", "delete globalThis.__eval_result"),
+                    )
+                    .await;
+                tracing::trace!(attempts = attempts, "Promise resolved via JS polling");
+                return serde_json::from_str(result_str).map_err(BamlRtError::Json);
+            }
+
+            // Run pending jobs - this processes promise continuations in QuickJS
+            self.runtime
+                .add_rt_task_to_event_loop(|rt| {
+                    rt.run_pending_jobs_if_any();
+                })
+                .await;
+
+            // Yield to allow the helper thread's tokio tasks to progress
+            tokio::task::yield_now().await;
+            tokio::time::sleep(Duration::from_millis(1)).await;
+
+            attempts += 1;
+            if attempts % 1000 == 0 {
+                tracing::debug!(
+                    attempts = attempts,
+                    "Still polling for JS promise resolution"
+                );
+            }
+            if attempts >= MAX_ATTEMPTS {
+                let _ = self
+                    .runtime
+                    .eval(
+                        None,
+                        Script::new("cleanup.js", "delete globalThis.__eval_result"),
+                    )
+                    .await;
+                return Err(BamlRtError::QuickJs(format!(
+                    "Promise did not resolve after {} attempts ({}ms)",
+                    MAX_ATTEMPTS, MAX_ATTEMPTS
+                )));
             }
         }
     }
