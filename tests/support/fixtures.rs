@@ -1,7 +1,8 @@
 //! Test fixture loading and creation helpers
+#![allow(dead_code)]
 
 use baml_rt::error::{BamlRtError, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Get the path to a test fixture
 pub fn fixture_path(relative_path: &str) -> PathBuf {

@@ -42,10 +42,10 @@ impl<FS: FileSystem> Packager for StdPackager<FS> {
             let content = fs::read_to_string(&manifest_path).map_err(BamlRtError::Io)?;
             let mut header = Header::new_gnu();
             header.set_path("manifest.json").map_err(|e| {
-                BamlRtError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to set tar header path: {}", e),
-                ))
+                BamlRtError::Io(std::io::Error::other(format!(
+                    "Failed to set tar header path: {}",
+                    e
+                )))
             })?;
             header.set_size(content.len() as u64);
             header.set_cksum();
@@ -59,10 +59,10 @@ impl<FS: FileSystem> Packager for StdPackager<FS> {
             let content = fs::read_to_string(&package_json_path).map_err(BamlRtError::Io)?;
             let mut header = Header::new_gnu();
             header.set_path("package.json").map_err(|e| {
-                BamlRtError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to set tar header path: {}", e),
-                ))
+                BamlRtError::Io(std::io::Error::other(format!(
+                    "Failed to set tar header path: {}",
+                    e
+                )))
             })?;
             header.set_size(content.len() as u64);
             header.set_cksum();
@@ -126,10 +126,10 @@ fn add_directory_to_tar<FS: FileSystem>(
         let tar_path = format!("{}/{}", prefix, relative_path.display());
         let mut header = Header::new_gnu();
         header.set_path(&tar_path).map_err(|e| {
-            BamlRtError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("Failed to set tar header path: {}", e),
-            ))
+            BamlRtError::Io(std::io::Error::other(format!(
+                "Failed to set tar header path: {}",
+                e
+            )))
         })?;
         header.set_size(content.len() as u64);
         header.set_cksum();

@@ -11,6 +11,9 @@
 //! may fail (e.g., 401 auth errors), but the interception logic is still fully tested
 //! because `build_request()` is called regardless of whether the actual HTTP request succeeds.
 
+#[path = "../common.rs"]
+mod common;
+
 use baml_rt::{
     baml::BamlRuntimeManager,
     error::Result,
@@ -66,6 +69,7 @@ struct PostExecutionTracker {
 }
 
 impl PostExecutionTracker {
+    #[allow(clippy::type_complexity)]
     fn new() -> (Self, Arc<Mutex<Vec<(LLMCallContext, bool, u64)>>>) {
         let calls = Arc::new(Mutex::new(Vec::new()));
         let tracker = Self {
@@ -151,6 +155,7 @@ struct CombinedTracker {
 }
 
 impl CombinedTracker {
+    #[allow(clippy::type_complexity)]
     fn new() -> (
         Self,
         Arc<Mutex<Vec<LLMCallContext>>>,
@@ -194,7 +199,10 @@ async fn test_pre_execution_interception_integration() {
 
     // Set up BAML runtime
     let mut baml_manager = BamlRuntimeManager::new().unwrap();
-    baml_manager.load_schema("baml_src").unwrap();
+    let agent_dir = common::agent_fixture("minimal-agent");
+    baml_manager
+        .load_schema(agent_dir.to_str().unwrap())
+        .unwrap();
 
     // Register pre-execution tracker
     let (pre_tracker, pre_calls) = PreExecutionTracker::new();
@@ -256,7 +264,10 @@ async fn test_post_execution_interception_integration() {
 
     // Set up BAML runtime
     let mut baml_manager = BamlRuntimeManager::new().unwrap();
-    baml_manager.load_schema("baml_src").unwrap();
+    let agent_dir = common::agent_fixture("minimal-agent");
+    baml_manager
+        .load_schema(agent_dir.to_str().unwrap())
+        .unwrap();
 
     // Register post-execution tracker
     let (post_tracker, post_calls) = PostExecutionTracker::new();
@@ -320,7 +331,10 @@ async fn test_blocking_interception_integration() {
 
     // Set up BAML runtime
     let mut baml_manager = BamlRuntimeManager::new().unwrap();
-    baml_manager.load_schema("baml_src").unwrap();
+    let agent_dir = common::agent_fixture("minimal-agent");
+    baml_manager
+        .load_schema(agent_dir.to_str().unwrap())
+        .unwrap();
 
     // Register blocking interceptor that blocks a common model name
     // We'll block models containing "deepseek" or clients containing "openrouter"
@@ -388,7 +402,10 @@ async fn test_pre_and_post_execution_together_integration() {
 
     // Set up BAML runtime
     let mut baml_manager = BamlRuntimeManager::new().unwrap();
-    baml_manager.load_schema("baml_src").unwrap();
+    let agent_dir = common::agent_fixture("minimal-agent");
+    baml_manager
+        .load_schema(agent_dir.to_str().unwrap())
+        .unwrap();
 
     // Register combined tracker
     let (combined_tracker, pre_calls, post_calls) = CombinedTracker::new();
@@ -466,7 +483,10 @@ async fn test_multiple_interceptors_integration() {
 
     // Set up BAML runtime
     let mut baml_manager = BamlRuntimeManager::new().unwrap();
-    baml_manager.load_schema("baml_src").unwrap();
+    let agent_dir = common::agent_fixture("minimal-agent");
+    baml_manager
+        .load_schema(agent_dir.to_str().unwrap())
+        .unwrap();
 
     // Register multiple interceptors
     let (pre_tracker1, pre_calls1) = PreExecutionTracker::new();

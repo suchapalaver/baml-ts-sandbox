@@ -9,7 +9,6 @@
 //! 4. We map the BAML variant to our Rust tool function and execute it
 
 use baml_rt::baml::BamlRuntimeManager;
-use dotenvy;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -108,10 +107,10 @@ async fn test_e2e_baml_union_tool_calling() {
                 tracing::info!("✅ Tool executed successfully: {:?}", tool_result);
 
                 // Verify calculator result
-                if let Some(obj) = tool_result.as_object() {
-                    if let Some(result) = obj.get("result").and_then(|v| v.as_f64()) {
-                        assert_eq!(result, 345.0, "15 * 23 should equal 345");
-                    }
+                if let Some(obj) = tool_result.as_object()
+                    && let Some(result) = obj.get("result").and_then(|v| v.as_f64())
+                {
+                    assert_eq!(result, 345.0, "15 * 23 should equal 345");
                 }
             }
             Err(e) => {

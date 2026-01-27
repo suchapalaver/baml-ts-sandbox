@@ -7,7 +7,6 @@
 
 use baml_rt::baml::BamlRuntimeManager;
 use baml_rt::quickjs_bridge::QuickJSBridge;
-use dotenvy;
 use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::Mutex;

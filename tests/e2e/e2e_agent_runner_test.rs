@@ -1,6 +1,5 @@
 //! End-to-end tests for agent runner binary
 
-use dotenvy;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use std::fs;
@@ -10,13 +9,13 @@ use tar::Builder;
 
 /// Create a test agent package from a fixture agent
 fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    // Use the complex-agent fixture
+    // Use the minimal-agent fixture
     let manifest_dir = env!("CARGO_MANIFEST_DIR");
     let agent_dir = PathBuf::from(manifest_dir)
         .join("tests")
         .join("fixtures")
         .join("agents")
-        .join("complex-agent");
+        .join("minimal-agent");
 
     if !agent_dir.exists() {
         return Err(format!("Fixture agent directory not found: {}", agent_dir.display()).into());
@@ -40,6 +39,14 @@ fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::erro
     } else {
         return Err("Fixture agent baml_src not found".into());
     }
+
+    // Create dist directory with minimal index.js
+    let dist_dir = temp_dir.join("dist");
+    fs::create_dir_all(&dist_dir)?;
+    fs::write(
+        dist_dir.join("index.js"),
+        "// Minimal agent entry point\nconsole.log('Agent loaded');\n",
+    )?;
 
     // Create manifest.json
     let manifest = serde_json::json!({

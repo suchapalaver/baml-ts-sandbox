@@ -299,11 +299,12 @@ fn test_cli_run_agent_with_function() {
         // The command might fail due to missing API keys or other runtime issues
         // But it should at least start correctly and not crash immediately
         // We check that we got some output (either success or a meaningful error)
-        if !stdout.is_empty() || !stderr.is_empty() {
-            // Got some output, which means the CLI processed the request
-            // (The actual execution might fail for valid reasons like missing API keys)
-            assert!(true, "Command executed and produced output");
-        }
+        // Got some output, which means the CLI processed the request
+        // (The actual execution might fail for valid reasons like missing API keys)
+        assert!(
+            !stdout.is_empty() || !stderr.is_empty(),
+            "Command should execute and produce output"
+        );
     }
 }
 
@@ -311,7 +312,6 @@ fn test_cli_run_agent_with_function() {
 #[ignore] // Skip to avoid Rust 2021 string literal parsing issues
 fn test_cli_package_creates_manifest_if_missing() {
     // Test skipped - core functionality tested in test_cli_package_agent
-    assert!(true);
 }
 
 #[tokio::test]

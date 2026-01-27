@@ -8,7 +8,6 @@ use baml_rt::{
     error::Result,
     interceptor::{InterceptorDecision, LLMCallContext, LLMInterceptor},
 };
-use dotenvy;
 use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -20,6 +19,7 @@ struct E2ELLMLoggingInterceptor {
 }
 
 impl E2ELLMLoggingInterceptor {
+    #[allow(clippy::type_complexity)]
     fn new() -> (
         Self,
         Arc<Mutex<Vec<LLMCallContext>>>,

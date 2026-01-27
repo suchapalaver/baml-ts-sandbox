@@ -2,6 +2,7 @@
 //!
 //! These tools implement the BamlTool trait and are used in tests
 //! to verify tool registration, execution, and integration.
+#![allow(dead_code)]
 
 use async_trait::async_trait;
 use baml_rt::error::Result;

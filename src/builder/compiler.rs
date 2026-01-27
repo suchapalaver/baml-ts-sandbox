@@ -79,6 +79,12 @@ impl RuntimeTypeGenerator {
     }
 }
 
+impl Default for RuntimeTypeGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl TypeGenerator for RuntimeTypeGenerator {
     async fn generate(&self, baml_src: &Path, build_dir: &BuildDir) -> Result<()> {

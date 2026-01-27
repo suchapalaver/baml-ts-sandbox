@@ -2,7 +2,6 @@
 
 use baml_rt::baml::BamlRuntimeManager;
 use baml_rt::quickjs_bridge::QuickJSBridge;
-use dotenvy;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
@@ -119,13 +118,12 @@ async fn test_e2e_streaming_greeting() {
             tracing::info!("Response: {}", response_str);
 
             // Parse the response to verify chunks were received
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(response_str) {
-                if let Some(obj) = parsed.as_object() {
-                    if let Some(chunks) = obj.get("chunks") {
-                        assert!(chunks.as_array().is_some(), "Should have chunks array");
-                        tracing::info!("Received {} chunks", chunks.as_array().unwrap().len());
-                    }
-                }
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(response_str)
+                && let Some(obj) = parsed.as_object()
+                && let Some(chunks) = obj.get("chunks")
+            {
+                assert!(chunks.as_array().is_some(), "Should have chunks array");
+                tracing::info!("Received {} chunks", chunks.as_array().unwrap().len());
             }
         }
         Err(e) => {

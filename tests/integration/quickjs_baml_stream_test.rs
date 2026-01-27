@@ -14,10 +14,10 @@ async fn test_js_stream_baml_function() {
     let mut baml_manager = BamlRuntimeManager::new().unwrap();
 
     // Load BAML schema from agent fixture (which has baml_src directory)
-    let agent_dir = common::agent_fixture("complex-agent");
+    let agent_dir = common::agent_fixture("minimal-agent");
     assert!(
         agent_dir.join("baml_src").exists(),
-        "complex-agent fixture must have baml_src directory"
+        "minimal-agent fixture must have baml_src directory"
     );
     baml_manager
         .load_schema(agent_dir.to_str().unwrap())
@@ -72,13 +72,13 @@ async fn test_js_stream_baml_function() {
         );
 
         // If it succeeded, results should be an array
-        if let Some(success) = obj.get("success").and_then(|s| s.as_bool()) {
-            if success {
-                assert!(
-                    obj.contains_key("results"),
-                    "Success result should contain 'results' array"
-                );
-            }
+        if let Some(success) = obj.get("success").and_then(|s| s.as_bool())
+            && success
+        {
+            assert!(
+                obj.contains_key("results"),
+                "Success result should contain 'results' array"
+            );
         }
     } else {
         panic!("Result should be an object");

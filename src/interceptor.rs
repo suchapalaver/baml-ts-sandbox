@@ -126,7 +126,7 @@ impl<I: ?Sized> InterceptorPipeline<I> {
     /// Add an interceptor to the pipeline
     ///
     /// Interceptors are executed in the order they are added.
-    pub fn add(mut self, interceptor: Arc<I>) -> Self {
+    pub fn with_interceptor(mut self, interceptor: Arc<I>) -> Self {
         self.interceptors.push(interceptor);
         self
     }
@@ -193,7 +193,8 @@ impl InterceptorRegistry {
     /// blocks the call, subsequent interceptors are not called.
     pub fn register_llm_interceptor<I: LLMInterceptor>(&mut self, interceptor: I) {
         let pipeline = std::mem::take(&mut self.llm_pipeline);
-        self.llm_pipeline = pipeline.add(Arc::new(interceptor) as Arc<dyn LLMInterceptor>);
+        self.llm_pipeline =
+            pipeline.with_interceptor(Arc::new(interceptor) as Arc<dyn LLMInterceptor>);
     }
 
     /// Register a tool interceptor
@@ -202,7 +203,8 @@ impl InterceptorRegistry {
     /// blocks the call, subsequent interceptors are not called.
     pub fn register_tool_interceptor<I: ToolInterceptor>(&mut self, interceptor: I) {
         let pipeline = std::mem::take(&mut self.tool_pipeline);
-        self.tool_pipeline = pipeline.add(Arc::new(interceptor) as Arc<dyn ToolInterceptor>);
+        self.tool_pipeline =
+            pipeline.with_interceptor(Arc::new(interceptor) as Arc<dyn ToolInterceptor>);
     }
 
     /// Add an LLM interceptor pipeline

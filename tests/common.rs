@@ -1,6 +1,7 @@
 //! Common test utilities and shared modules
 //!
 //! This module provides shared utilities for tests, including fixture loading and test tools.
+#![allow(dead_code, unused_imports)]
 
 #[path = "support/mod.rs"]
 mod support_internal;
@@ -13,7 +14,7 @@ pub use support::tools::*;
 
 // Fixture helpers
 use baml_rt::error::{BamlRtError, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 pub fn fixture_path(relative_path: &str) -> PathBuf {
     let manifest_dir = env!("CARGO_MANIFEST_DIR");

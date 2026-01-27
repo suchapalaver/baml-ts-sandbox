@@ -40,26 +40,23 @@ impl AgentPackage {
                 .unwrap()
                 .as_secs()
         ));
-        std::fs::create_dir_all(&extract_dir).map_err(|e| BamlRtError::Io(e))?;
+        std::fs::create_dir_all(&extract_dir).map_err(BamlRtError::Io)?;
 
         {
             let extract_span = spans::extract_package(&extract_dir);
             let _extract_guard = extract_span.enter();
 
             // Extract tar.gz
-            let tar_gz = std::fs::File::open(package_path).map_err(|e| BamlRtError::Io(e))?;
+            let tar_gz = std::fs::File::open(package_path).map_err(BamlRtError::Io)?;
             let tar = flate2::read::GzDecoder::new(tar_gz);
             let mut archive = tar::Archive::new(tar);
 
-            archive
-                .unpack(&extract_dir)
-                .map_err(|e| BamlRtError::Io(e))?;
+            archive.unpack(&extract_dir).map_err(BamlRtError::Io)?;
         }
 
         // Load manifest
         let manifest_path = extract_dir.join("manifest.json");
-        let manifest_content =
-            std::fs::read_to_string(&manifest_path).map_err(|e| BamlRtError::Io(e))?;
+        let manifest_content = std::fs::read_to_string(&manifest_path).map_err(BamlRtError::Io)?;
         let manifest_json: Value =
             serde_json::from_str(&manifest_content).map_err(BamlRtError::Json)?;
 
@@ -136,8 +133,7 @@ impl AgentPackage {
             let eval_span = spans::evaluate_agent_code(&manifest.entry_point);
             let _eval_guard = eval_span.enter();
 
-            let agent_code =
-                std::fs::read_to_string(&entry_point_path).map_err(|e| BamlRtError::Io(e))?;
+            let agent_code = std::fs::read_to_string(&entry_point_path).map_err(BamlRtError::Io)?;
 
             info!(
                 entry_point = manifest.entry_point,

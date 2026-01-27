@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 /// Configuration for QuickJS runtime options
 ///
 /// These options map directly to the available options in `quickjs_runtime::builder::QuickJsRuntimeBuilder`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct QuickJSConfig {
     /// Maximum memory limit in bytes (None = no limit)
     pub memory_limit: Option<u64>,
@@ -27,17 +27,6 @@ pub struct QuickJSConfig {
 
     /// Garbage collection interval - triggers a full GC every set interval (None = disabled)
     pub gc_interval: Option<Duration>,
-}
-
-impl Default for QuickJSConfig {
-    fn default() -> Self {
-        Self {
-            memory_limit: None,
-            max_stack_size: None,
-            gc_threshold: None,
-            gc_interval: None,
-        }
-    }
 }
 
 impl QuickJSConfig {
@@ -74,6 +63,7 @@ impl QuickJSConfig {
 }
 
 /// Configuration for the BAML runtime environment
+#[derive(Default)]
 pub struct RuntimeConfig {
     /// Path to the BAML schema directory
     pub schema_path: Option<PathBuf>,
@@ -92,19 +82,6 @@ pub struct RuntimeConfig {
 
     /// Tool interceptor pipeline
     pub tool_interceptor_pipeline: Option<InterceptorPipeline<dyn ToolInterceptor>>,
-}
-
-impl Default for RuntimeConfig {
-    fn default() -> Self {
-        Self {
-            schema_path: None,
-            enable_quickjs: false,
-            quickjs_config: QuickJSConfig::default(),
-            env_vars: Vec::new(),
-            llm_interceptor_pipeline: None,
-            tool_interceptor_pipeline: None,
-        }
-    }
 }
 
 impl RuntimeConfig {
@@ -240,9 +217,9 @@ impl RuntimeBuilder {
             .config
             .llm_interceptor_pipeline
             .take()
-            .unwrap_or_else(|| InterceptorPipeline::new());
+            .unwrap_or_default();
         self.config.llm_interceptor_pipeline =
-            Some(pipeline.add(Arc::new(interceptor) as Arc<dyn LLMInterceptor>));
+            Some(pipeline.with_interceptor(Arc::new(interceptor) as Arc<dyn LLMInterceptor>));
         self
     }
 
@@ -252,10 +229,10 @@ impl RuntimeBuilder {
             .config
             .llm_interceptor_pipeline
             .take()
-            .unwrap_or_else(|| InterceptorPipeline::new());
+            .unwrap_or_default();
 
         for interceptor in interceptors {
-            pipeline = pipeline.add(Arc::new(interceptor) as Arc<dyn LLMInterceptor>);
+            pipeline = pipeline.with_interceptor(Arc::new(interceptor) as Arc<dyn LLMInterceptor>);
         }
 
         self.config.llm_interceptor_pipeline = Some(pipeline);
@@ -281,9 +258,9 @@ impl RuntimeBuilder {
             .config
             .tool_interceptor_pipeline
             .take()
-            .unwrap_or_else(|| InterceptorPipeline::new());
+            .unwrap_or_default();
         self.config.tool_interceptor_pipeline =
-            Some(pipeline.add(Arc::new(interceptor) as Arc<dyn ToolInterceptor>));
+            Some(pipeline.with_interceptor(Arc::new(interceptor) as Arc<dyn ToolInterceptor>));
         self
     }
 
@@ -293,10 +270,10 @@ impl RuntimeBuilder {
             .config
             .tool_interceptor_pipeline
             .take()
-            .unwrap_or_else(|| InterceptorPipeline::new());
+            .unwrap_or_default();
 
         for interceptor in interceptors {
-            pipeline = pipeline.add(Arc::new(interceptor) as Arc<dyn ToolInterceptor>);
+            pipeline = pipeline.with_interceptor(Arc::new(interceptor) as Arc<dyn ToolInterceptor>);
         }
 
         self.config.tool_interceptor_pipeline = Some(pipeline);
@@ -333,8 +310,8 @@ impl RuntimeBuilder {
         }
 
         // Extract pipelines before moving config
-        let llm_pipeline = std::mem::replace(&mut self.config.llm_interceptor_pipeline, None);
-        let tool_pipeline = std::mem::replace(&mut self.config.tool_interceptor_pipeline, None);
+        let llm_pipeline = self.config.llm_interceptor_pipeline.take();
+        let tool_pipeline = self.config.tool_interceptor_pipeline.take();
 
         // Inject LLM interceptor pipeline if provided
         if let Some(llm_pipeline) = llm_pipeline {

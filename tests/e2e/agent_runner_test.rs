@@ -1,7 +1,6 @@
 //! Tests for agent runner binary
 
 use baml_rt::baml::BamlRuntimeManager;
-use dotenvy;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use std::fs;
@@ -64,6 +63,7 @@ fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::erro
     Ok(())
 }
 
+#[allow(dead_code)]
 fn copy_dir_all(src: &Path, dst: &Path) -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {

@@ -39,10 +39,10 @@ impl FileSystem for StdFileSystem {
 
             if path.is_dir() {
                 self.collect_ts_js_files(&path, files)?;
-            } else if let Some(ext) = path.extension() {
-                if ext == "ts" || ext == "tsx" || ext == "js" || ext == "jsx" {
-                    files.push(path);
-                }
+            } else if let Some(ext) = path.extension()
+                && (ext == "ts" || ext == "tsx" || ext == "js" || ext == "jsx")
+            {
+                files.push(path);
             }
         }
 
@@ -60,10 +60,10 @@ impl FileSystem for StdFileSystem {
 
             if path.is_dir() {
                 self.collect_ts_files(&path, files)?;
-            } else if let Some(ext) = path.extension() {
-                if ext == "ts" || ext == "tsx" {
-                    files.push(path);
-                }
+            } else if let Some(ext) = path.extension()
+                && (ext == "ts" || ext == "tsx")
+            {
+                files.push(path);
             }
         }
 

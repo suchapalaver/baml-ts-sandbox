@@ -133,10 +133,10 @@ impl BuildDir {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(|e| {
-                crate::error::BamlRtError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    format!("Failed to get system time: {}", e),
-                ))
+                crate::error::BamlRtError::Io(std::io::Error::other(format!(
+                    "Failed to get system time: {}",
+                    e
+                )))
             })?;
 
         let build_dir = std::env::temp_dir().join(format!("baml-build-{}", timestamp.as_secs()));
