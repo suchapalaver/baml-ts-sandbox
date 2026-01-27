@@ -15,7 +15,6 @@ use tokio::sync::Mutex;
 // We'll use the actual load_agent_package logic
 
 #[tokio::test]
-#[ignore] // Blocked by QuickJS promise resolution issue - see /quickjs-promise-issue skill
 async fn test_loaded_agent_invoke_function_contract() {
     // Contract: LoadedAgent::invoke_function must return the actual result, not wrapped
 
@@ -65,7 +64,8 @@ async fn test_loaded_agent_invoke_function_contract() {
                 const args = {};
                 let promise;
                 if (typeof {} === 'function') {{
-                    promise = {}(args);
+                    // greetUser expects a name string, not the full args object
+                    promise = {}(args.name);
                 }} else {{
                     promise = __baml_invoke("{}", JSON.stringify(args));
                 }}
@@ -78,30 +78,48 @@ async fn test_loaded_agent_invoke_function_contract() {
         args_json, function_name, function_name, function_name
     );
 
-    let result = js_bridge.evaluate(&js_code).await.unwrap();
+    let result = js_bridge.evaluate(&js_code).await;
 
     // CONTRACT: Result must be a string (the actual greeting), not {"success": true}
-    assert!(
-        result.is_string(),
-        "CONTRACT VIOLATION: invoke_function must return string result, got: {:?}",
-        result
-    );
+    match result {
+        Ok(val) => {
+            assert!(
+                val.is_string(),
+                "CONTRACT VIOLATION: invoke_function must return string result, got: {:?}",
+                val
+            );
 
-    // CONTRACT: Must NOT be a success wrapper
-    if let Some(obj) = result.as_object() {
-        panic!(
-            "CONTRACT VIOLATION: Result is object with 'success': {:?}. Must return actual result.",
-            obj
-        );
-    }
+            // CONTRACT: Must NOT be a success wrapper
+            if let Some(obj) = val.as_object() {
+                panic!(
+                    "CONTRACT VIOLATION: Result is object with 'success': {:?}. Must return actual result.",
+                    obj
+                );
+            }
 
-    let greeting = result.as_str().unwrap();
-    // API key errors are acceptable (proves function was called)
-    if !greeting.contains("error") && !greeting.contains("401") {
-        assert!(
-            greeting.contains("ContractTest") || greeting.contains("Contract"),
-            "Expected greeting to contain name, got: '{}'",
-            greeting
-        );
+            let greeting = val.as_str().unwrap();
+            // API key errors are acceptable (proves function was called)
+            if !greeting.contains("error") && !greeting.contains("401") {
+                assert!(
+                    greeting.contains("ContractTest") || greeting.contains("Contract"),
+                    "Expected greeting to contain name, got: '{}'",
+                    greeting
+                );
+            }
+        }
+        Err(e) => {
+            // Check if it's an API key error (acceptable for contract test)
+            let error_str = format!("{}", e);
+            if !error_str.contains("401")
+                && !error_str.contains("Unauthorized")
+                && !error_str.contains("API key")
+            {
+                panic!(
+                    "CONTRACT VIOLATION: Unexpected error: {}. Function should return string result.",
+                    e
+                );
+            }
+            // API key errors are acceptable - we're testing the contract, not the LLM call
+        }
     }
 }

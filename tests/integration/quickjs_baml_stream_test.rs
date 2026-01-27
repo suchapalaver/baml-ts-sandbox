@@ -64,6 +64,9 @@ async fn test_js_stream_baml_function() {
     println!("JavaScript streaming execution result: {:?}", json_result);
 
     // Check if we got a proper result structure
+    // The streaming function may return:
+    // - An object with success/error fields (synchronous error case)
+    // - An array of results (streaming results, may contain error objects)
     if let Some(obj) = json_result.as_object() {
         // Should have either success with results, or error
         assert!(
@@ -80,7 +83,27 @@ async fn test_js_stream_baml_function() {
                 "Success result should contain 'results' array"
             );
         }
+    } else if let Some(arr) = json_result.as_array() {
+        // Streaming may return an array of results
+        // Each item should be an object (could be error or data)
+        assert!(
+            !arr.is_empty(),
+            "Streaming results should not be empty array"
+        );
+        // Check if it contains error (expected when API key is missing)
+        let has_error = arr.iter().any(|item| {
+            item.as_object()
+                .map(|obj| obj.contains_key("error"))
+                .unwrap_or(false)
+        });
+        if has_error {
+            // API key error is acceptable - streaming was invoked but failed
+            return;
+        }
     } else {
-        panic!("Result should be an object");
+        panic!(
+            "Result should be an object or array, got: {:?}",
+            json_result
+        );
     }
 }

@@ -351,21 +351,39 @@ impl QuickJSBridge {
                 // Use JsValueFacade::new_promise to create a non-blocking promise
                 // The producer is a Future that will be executed asynchronously
                 // Type parameters: R is the result type (JsValueFacade), P is the Future, M is unused/mapper
+                tracing::debug!("[BAML_INVOKE] Creating promise for function: {}", func_name);
                 tracing::debug!(function = %func_name, "Creating promise for BAML function invocation");
                 Ok(JsValueFacade::new_promise::<JsValueFacade, _, ()>(async move {
                     // Execute the BAML function asynchronously
-                    tracing::trace!(function = %func_name_clone, "BAML promise producer starting");
+                    tracing::debug!("[BAML_INVOKE] Promise producer starting for: {}", func_name_clone);
+                    tracing::debug!(function = %func_name_clone, "BAML promise producer starting execution");
                     let manager = manager_for_promise.lock().await;
+                    tracing::debug!("[BAML_INVOKE] Manager locked, invoking: {}", func_name_clone);
+                    tracing::debug!(function = %func_name_clone, "Manager locked, invoking BAML function");
                     let result = manager.invoke_function(&func_name_clone, args_json).await;
-                    tracing::trace!(function = %func_name_clone, success = result.is_ok(), "BAML function execution completed");
+                    tracing::debug!("[BAML_INVOKE] Execution completed, success={}: {}", result.is_ok(), func_name_clone);
+                    tracing::debug!(function = %func_name_clone, success = result.is_ok(), "BAML function execution completed");
 
                     match result {
                         Ok(json_value) => {
+                            tracing::debug!("[BAML_INVOKE] Function succeeded, resolving promise: {}", func_name_clone);
+                            tracing::debug!(function = %func_name_clone, "BAML function succeeded, converting to JsValue");
                             // Convert JSON value to JsValueFacade directly (no stringify needed)
                             Ok(value_to_js_value_facade(json_value))
                         }
                         Err(e) => {
-                            Err(quickjs_runtime::jsutils::JsError::new_str(&format!("BAML execution error: {}", e)))
+                            let error_msg = format!("{}", e);
+                            tracing::debug!("[BAML_INVOKE] Function failed, returning error object: {} - error: {}", func_name_clone, error_msg);
+                            tracing::warn!(function = %func_name_clone, error = %error_msg, "BAML function failed, returning error object");
+
+                            // CRITICAL FIX: Return error as successful promise resolution with __baml_error marker
+                            // Returning Err(JsError) doesn't properly reject JavaScript promises in quickjs_runtime
+                            // Instead, we resolve with an error object that JavaScript can detect and handle
+                            let error_value = serde_json::json!({
+                                "__baml_error": true,
+                                "message": error_msg
+                            });
+                            Ok(value_to_js_value_facade(error_value))
                         }
                     }
                 }))
@@ -643,6 +661,7 @@ impl QuickJSBridge {
         let js_code = format!(
             r#"
             globalThis.{} = async function(...args) {{
+                console.log('[JS_WRAPPER] Function called: {}');
                 // Convert arguments to a JSON object
                 const argObj = {{}};
                 // For now, handle simple cases - can be enhanced later
@@ -655,13 +674,24 @@ impl QuickJSBridge {
                         argObj[`arg${{idx}}`] = arg;
                     }});
                 }}
-                
+
+                console.log('[JS_WRAPPER] Calling __baml_invoke');
                 // Call the Rust helper function - JSON.stringify once here is efficient
                 // The helper returns a promise that will resolve asynchronously
-                return await __baml_invoke("{}", JSON.stringify(argObj));
+                const result = await __baml_invoke("{}", JSON.stringify(argObj));
+                console.log('[JS_WRAPPER] __baml_invoke returned, checking for error');
+
+                // Check if result is an error object (workaround for quickjs_runtime promise rejection issues)
+                if (result && typeof result === 'object' && result.__baml_error === true) {{
+                    console.log('[JS_WRAPPER] Error detected, throwing:', result.message);
+                    throw new Error(result.message || 'BAML function execution failed');
+                }}
+
+                console.log('[JS_WRAPPER] Returning result');
+                return result;
             }};
             "#,
-            function_name, function_name
+            function_name, function_name, function_name
         );
 
         let script = Script::new("register_function.js", &js_code);
@@ -775,7 +805,15 @@ impl QuickJSBridge {
             format!("(function() {{ return ({}) }})()", code_trimmed)
         };
         let direct_script = Script::new("eval_direct.js", &direct_code);
-        let direct_result = self.runtime.eval(None, direct_script).await;
+        let mut direct_result = self.runtime.eval(None, direct_script).await;
+
+        // If wrapped execution fails (likely syntax error from wrapping statements),
+        // try executing the code directly without wrapping
+        if direct_result.is_err() && !already_wrapped {
+            tracing::debug!("Wrapped execution failed, trying direct execution");
+            let unwrapped_script = Script::new("eval_unwrapped.js", code_trimmed);
+            direct_result = self.runtime.eval(None, unwrapped_script).await;
+        }
 
         // If direct execution succeeds, handle the result
         if let Ok(js_result) = direct_result {
@@ -786,10 +824,34 @@ impl QuickJSBridge {
                 "Direct execution result type"
             );
 
-            // Check if it's a promise - if so, use poll_for_result
+            // Check if it's a promise - if so, wrap with async polling mechanism
             if js_result.is_js_promise() || debug_str.contains("Promise") {
-                tracing::debug!("Result is a promise, using poll_for_result");
-                return self.poll_for_result(&js_result).await;
+                tracing::debug!("Result is a promise, wrapping with async result handler");
+
+                // The original code returned a promise but didn't set __eval_result
+                // We need to wrap it so the polling mechanism works
+                let wrapped_code = format!(
+                    r#"
+                    (async function() {{
+                        try {{
+                            const codePromise = {};
+                            const result = await codePromise;
+                            globalThis.__eval_result = typeof result === 'string' ? result : JSON.stringify(result);
+                        }} catch (error) {{
+                            globalThis.__eval_result = JSON.stringify({{ error: error.toString() }});
+                        }}
+                    }})()
+                    "#,
+                    code
+                );
+
+                let wrapped_script = Script::new("eval_promise_wrapper.js", &wrapped_code);
+                let _ =
+                    self.runtime.eval(None, wrapped_script).await.map_err(|e| {
+                        BamlRtError::QuickJs(format!("Failed to wrap promise: {}", e))
+                    })?;
+
+                return self.poll_for_eval_result().await;
             }
 
             // Not a promise - handle synchronous result
@@ -864,6 +926,9 @@ impl QuickJSBridge {
         let mut attempts = 0;
         const MAX_ATTEMPTS: u32 = 10000;
 
+        tracing::debug!("[POLL] Starting promise polling loop");
+        tracing::debug!("Starting promise polling loop");
+
         loop {
             // Check if result is available via global variable
             let check_code = r#"
@@ -881,8 +946,26 @@ impl QuickJSBridge {
                 .await
                 .map_err(|e| BamlRtError::QuickJs(format!("Failed to check result: {}", e)))?;
 
+            if attempts < 5 || attempts % 100 == 0 {
+                tracing::trace!(
+                    "[POLL] Attempt {}: is_string={}",
+                    attempts,
+                    check_result.is_string()
+                );
+                tracing::debug!(
+                    attempts = attempts,
+                    is_string = check_result.is_string(),
+                    "__eval_result check"
+                );
+            }
+
             if check_result.is_string() {
                 let result_str = check_result.get_str();
+                tracing::debug!(
+                    "[POLL] Promise resolved after {} attempts, result_length={}",
+                    attempts,
+                    result_str.len()
+                );
                 // Clean up the global
                 let _ = self
                     .runtime
@@ -891,11 +974,27 @@ impl QuickJSBridge {
                         Script::new("cleanup.js", "delete globalThis.__eval_result"),
                     )
                     .await;
-                tracing::trace!(attempts = attempts, "Promise resolved via polling");
-                return serde_json::from_str(result_str).map_err(BamlRtError::Json);
+                tracing::debug!(
+                    attempts = attempts,
+                    result_length = result_str.len(),
+                    "Promise resolved via polling"
+                );
+
+                // Parse the result and check if it's an error object
+                let parsed: Value = serde_json::from_str(result_str).map_err(BamlRtError::Json)?;
+
+                // Check if result is an error object from __awaitAndStringify
+                if let Some(error_msg) = parsed.get("error").and_then(|e| e.as_str()) {
+                    return Err(BamlRtError::QuickJs(error_msg.to_string()));
+                }
+
+                return Ok(parsed);
             }
 
             // Run pending jobs - this processes promise continuations in QuickJS
+            if attempts < 5 || attempts % 100 == 0 {
+                tracing::debug!(attempts = attempts, "Running pending QuickJS jobs");
+            }
             self.runtime
                 .add_rt_task_to_event_loop(|rt| {
                     rt.run_pending_jobs_if_any();
@@ -908,9 +1007,16 @@ impl QuickJSBridge {
 
             attempts += 1;
             if attempts % 1000 == 0 {
-                tracing::debug!(attempts = attempts, "Still polling for promise resolution");
+                tracing::warn!(
+                    attempts = attempts,
+                    "Still polling for promise resolution - checking for stuck promise"
+                );
             }
             if attempts >= MAX_ATTEMPTS {
+                tracing::error!(
+                    attempts = MAX_ATTEMPTS,
+                    "Promise polling timeout - promise never resolved"
+                );
                 let _ = self
                     .runtime
                     .eval(

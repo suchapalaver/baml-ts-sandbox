@@ -13,7 +13,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[tokio::test]
-#[ignore] // Known issue: QuickJS promise resolution for Rust async tool calls
 async fn test_baml_function_returns_string_result() {
     // Contract: When a BAML function returns a string, invoke_function should return that string
     // (not wrapped in {"success": true} or any other wrapper)
@@ -75,7 +74,6 @@ async fn test_baml_function_returns_string_result() {
 }
 
 #[tokio::test]
-#[ignore] // Known issue: QuickJS promise resolution for Rust async tool calls
 async fn test_js_function_invocation_returns_actual_result() {
     // Contract: When invoking a JavaScript function that calls BAML,
     // the result should be the actual BAML result, not a success wrapper
@@ -161,7 +159,6 @@ async fn test_js_function_invocation_returns_actual_result() {
 }
 
 #[tokio::test]
-#[ignore] // Known issue: QuickJS promise resolution for Rust async tool calls
 async fn test_invoke_function_api_contract() {
     // Contract: The invoke_function API (from baml-agent-builder) should return the actual function result,
     // not wrapped in any success object
