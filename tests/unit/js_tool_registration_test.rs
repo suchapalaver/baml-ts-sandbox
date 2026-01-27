@@ -10,7 +10,6 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 #[tokio::test]
-#[ignore] // QuickJS evaluate returns unexpected type - requires investigation
 async fn test_register_js_tool() {
     tracing::info!("Test: Register JavaScript tool");
 
@@ -82,7 +81,6 @@ async fn test_register_js_tool() {
 }
 
 #[tokio::test]
-#[ignore] // QuickJS evaluate returns unexpected type - requires investigation
 async fn test_register_js_tool_with_complex_logic() {
     tracing::info!("Test: Register JavaScript tool with complex logic");
 

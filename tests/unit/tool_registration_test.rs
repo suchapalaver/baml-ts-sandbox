@@ -161,7 +161,6 @@ async fn test_register_and_execute_tool_rust() {
 }
 
 #[tokio::test]
-#[ignore] // QuickJS evaluate returns unexpected type - requires investigation
 async fn test_register_and_execute_tool_js() {
     // Create BAML runtime manager
     let mut baml_manager = BamlRuntimeManager::new().unwrap();

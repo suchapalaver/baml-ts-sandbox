@@ -770,8 +770,9 @@ impl QuickJSBridge {
             // Code is already wrapped in a sync IIFE - execute directly
             code.to_string()
         } else {
-            // Code needs wrapping - wrap in IIFE (preserves side effects for assignments)
-            format!("(function() {{ {} }})()", code)
+            // Code needs wrapping - wrap in IIFE with return statement
+            // This ensures the last expression is returned, not lost
+            format!("(function() {{ return ({}) }})()", code_trimmed)
         };
         let direct_script = Script::new("eval_direct.js", &direct_code);
         let direct_result = self.runtime.eval(None, direct_script).await;
