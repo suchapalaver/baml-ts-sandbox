@@ -8,6 +8,16 @@ BAML Runtime is a Rust-based runtime for executing BAML (BoundaryML) functions w
 
 **Key Value**: Executes BAML functions in optimized Rust, exposes them to JavaScript/TypeScript via QuickJS, and provides tool registration and interceptor pipelines for governance and tracing.
 
+## Prerequisites
+
+Clone the BAML repository as a sibling directory:
+
+```bash
+git clone https://github.com/BoundaryML/baml.git ../baml
+```
+
+This provides the `baml-runtime`, `baml-types`, and `internal-baml-core` dependencies referenced in `Cargo.toml`.
+
 ## Development Environment
 
 ```bash
@@ -156,7 +166,7 @@ Use fixtures via:
 
 ## Key Dependencies
 
-- `baml-runtime`: Official BAML Rust runtime (local path: `../baml/engine/baml-runtime`)
+- `baml-runtime`, `baml-types`, `internal-baml-core`: BAML Rust libraries (see Prerequisites)
 - `quickjs_runtime`: Embedded JavaScript engine
 - `oxc_*`: TypeScript compilation and linting
 - `tokio`: Async runtime

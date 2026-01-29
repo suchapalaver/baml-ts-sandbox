@@ -911,14 +911,10 @@ impl QuickJSBridge {
         Ok(serde_json::json!({ "success": true, "result": debug_str }))
     }
 
-    /// Poll for __eval_result to be set by async JavaScript code
+    /// Polls for async JavaScript code to complete and return its result.
     ///
-    /// This is the core polling mechanism for promise resolution. It repeatedly checks
-    /// if `globalThis.__eval_result` has been set by the async IIFE wrapper, running
-    /// pending QuickJS jobs between checks to allow promise continuations to execute.
-    ///
-    /// This is a workaround for quickjs_runtime's `get_promise_result()` not correctly
-    /// receiving the resolved value from promises created via `JsValueFacade::new_promise()`.
+    /// Repeatedly checks for the resolved value from async operations, running
+    /// pending JavaScript jobs between checks to allow promise continuations to execute.
     async fn poll_for_eval_result(&mut self) -> Result<Value> {
         let poll_span = tracing::trace_span!("baml_rt.poll_promise_resolution");
         let _poll_guard = poll_span.enter();

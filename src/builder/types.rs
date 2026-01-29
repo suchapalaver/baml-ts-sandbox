@@ -123,12 +123,12 @@ impl AsRef<str> for FunctionName {
     }
 }
 
-/// Build directory - temporary directory for build artifacts
+/// Directory for storing build artifacts during compilation.
 #[derive(Debug, Clone)]
 pub struct BuildDir(PathBuf);
 
 impl BuildDir {
-    /// Create a new temporary build directory
+    /// Creates a new build directory for storing compilation artifacts.
     pub fn new() -> crate::error::Result<Self> {
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
