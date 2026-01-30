@@ -153,9 +153,10 @@ clap.workspace = true
 oxc_parser.workspace = true
 oxc_allocator.workspace = true
 oxc_span.workspace = true
-baml-runtime = { path = "../baml/engine/baml-runtime" }
-baml-types = { path = "../baml/engine/baml-lib/baml-types" }
-internal-baml-core = { path = "../baml/engine/baml-lib/baml-core" }
+# Pinned to BoundaryML/baml release 0.214.0 (commit bb42e0f).
+baml-runtime = { git = "https://github.com/BoundaryML/baml", rev = "bb42e0f" }
+baml-types = { git = "https://github.com/BoundaryML/baml", rev = "bb42e0f" }
+internal-baml-core = { git = "https://github.com/BoundaryML/baml", rev = "bb42e0f" }
 quickjs_runtime.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true

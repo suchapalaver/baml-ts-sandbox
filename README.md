@@ -170,6 +170,12 @@ cargo build --release
 cargo install --path . --bins
 ```
 
+### Dependency Model
+
+This repository pulls BAML engine crates from the official `BoundaryML/baml` repo via a pinned git revision
+(release `0.214.0`, commit `bb42e0f`). No sibling checkout is required. To align with a different BAML engine
+version, update the git `rev` in `Cargo.toml` (or use a `[patch]` override).
+
 ## Usage
 
 ### Creating an Agent
@@ -469,4 +475,3 @@ baml-rt/
 ## License
 
 [License information]
-
