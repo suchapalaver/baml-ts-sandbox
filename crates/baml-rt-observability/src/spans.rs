@@ -127,7 +127,9 @@ pub fn evaluate_agent_code(entry_point: &str) -> Span {
 /// Parent: CLI command span or interactive loop
 #[inline]
 pub fn invoke_function(agent_name: &str, function_name: &str) -> Span {
-    let correlation_id = current_correlation_id().unwrap_or_else(|| "none".to_string());
+    let correlation_id = current_correlation_id()
+        .map(|id| id.as_str().to_string())
+        .unwrap_or_else(|| "none".to_string());
     tracing::info_span!(
         "baml_rt.invoke_function",
         agent = agent_name,
@@ -149,7 +151,9 @@ pub fn evaluate_javascript() -> Span {
 /// Parent: invoke_function
 #[inline]
 pub fn invoke_js_function(function_name: &str) -> Span {
-    let correlation_id = current_correlation_id().unwrap_or_else(|| "none".to_string());
+    let correlation_id = current_correlation_id()
+        .map(|id| id.as_str().to_string())
+        .unwrap_or_else(|| "none".to_string());
     tracing::debug_span!(
         "baml_rt.invoke_js_function",
         function = function_name,
@@ -162,7 +166,9 @@ pub fn invoke_js_function(function_name: &str) -> Span {
 /// Parent: invoke_function or invoke_js_function
 #[inline]
 pub fn invoke_baml_function(function_name: &str) -> Span {
-    let correlation_id = current_correlation_id().unwrap_or_else(|| "none".to_string());
+    let correlation_id = current_correlation_id()
+        .map(|id| id.as_str().to_string())
+        .unwrap_or_else(|| "none".to_string());
     tracing::debug_span!(
         "baml_rt.invoke_baml_function",
         function = function_name,

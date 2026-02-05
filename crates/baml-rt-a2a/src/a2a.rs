@@ -4,9 +4,11 @@
 
 use crate::a2a_types::{
     JSONRPCError, JSONRPCErrorResponse, JSONRPCId, JSONRPCRequest, JSONRPCSuccessResponse,
-    Message, SendMessageRequest,
+    ListTasksRequest, Message, SendMessageRequest,
 };
 use baml_rt_core::{BamlRtError, Result};
+use baml_rt_core::context;
+use baml_rt_core::ids::ContextId;
 use serde_json::{json, Map, Value};
 
 const JSONRPC_VERSION: &str = "2.0";
@@ -58,6 +60,7 @@ pub struct A2aRequest {
     pub method: A2aMethod,
     pub params: Value,
     pub is_stream: bool,
+    pub context_id: Option<ContextId>,
 }
 
 impl A2aRequest {
@@ -73,16 +76,29 @@ impl A2aRequest {
         let id = request.id;
         let method: A2aMethod = request.method.parse()?;
         let mut params_value = request.params.unwrap_or(Value::Null);
+        let mut context_id = None;
         let is_stream = match method {
             A2aMethod::MessageSend => {
-                let params: SendMessageRequest =
+                let mut params: SendMessageRequest =
                     serde_json::from_value(params_value.clone()).map_err(BamlRtError::Json)?;
+                if params.message.context_id.is_none() {
+                    params.message.context_id = Some(context::generate_context_id());
+                }
+                context_id = params.message.context_id.clone();
+                params_value =
+                    serde_json::to_value(&params).map_err(BamlRtError::Json)?;
                 params_value = augment_message_params(params_value, &params.message);
                 stream_from_message_request(&params, &params_value)
             }
             A2aMethod::MessageSendStream => {
-                let params: SendMessageRequest =
+                let mut params: SendMessageRequest =
                     serde_json::from_value(params_value.clone()).map_err(BamlRtError::Json)?;
+                if params.message.context_id.is_none() {
+                    params.message.context_id = Some(context::generate_context_id());
+                }
+                context_id = params.message.context_id.clone();
+                params_value =
+                    serde_json::to_value(&params).map_err(BamlRtError::Json)?;
                 params_value = augment_message_params(params_value, &params.message);
                 true
             }
@@ -90,6 +106,13 @@ impl A2aRequest {
             | A2aMethod::TasksList
             | A2aMethod::TasksCancel
             | A2aMethod::TasksSubscribe => {
+                if method == A2aMethod::TasksList {
+                    if let Ok(params) =
+                        serde_json::from_value::<ListTasksRequest>(params_value.clone())
+                    {
+                        context_id = params.context_id;
+                    }
+                }
                 params_value
                     .get("stream")
                     .and_then(Value::as_bool)
@@ -109,6 +132,7 @@ impl A2aRequest {
             method,
             params: params_value,
             is_stream,
+            context_id,
         })
     }
 
@@ -436,8 +460,9 @@ mod tests {
     }
 
     fn user_message(message_id: &str, text: &str) -> Message {
+        use baml_rt_core::ids::MessageId;
         Message {
-            message_id: message_id.to_string(),
+            message_id: MessageId::from(message_id),
             role: MessageRole::String(ROLE_USER.to_string()),
             parts: vec![Part {
                 text: Some(text.to_string()),

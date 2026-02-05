@@ -40,6 +40,7 @@ impl LLMInterceptor for TracingLLMInterceptor {
             client = %context.client,
             model = %context.model,
             function = %context.function_name,
+            context_id = %context.context_id,
         );
         let _guard = span.enter();
 
@@ -65,6 +66,7 @@ impl LLMInterceptor for TracingLLMInterceptor {
             model = %context.model,
             function = %context.function_name,
             duration_ms = duration_ms,
+            context_id = %context.context_id,
         );
         let _guard = span.enter();
 
@@ -115,6 +117,7 @@ impl ToolInterceptor for TracingToolInterceptor {
             "tool_call",
             tool = %context.tool_name,
             function = ?context.function_name,
+            context_id = %context.context_id,
         );
         let _guard = span.enter();
 
@@ -140,6 +143,7 @@ impl ToolInterceptor for TracingToolInterceptor {
             tool = %context.tool_name,
             function = ?context.function_name,
             duration_ms = duration_ms,
+            context_id = %context.context_id,
         );
         let _guard = span.enter();
 

@@ -1,0 +1,19 @@
+ [package]
+ name = "baml-rt-provenance"
+ version = { workspace = true }
+ edition = { workspace = true }
+ authors = { workspace = true }
+ 
+ [lib]
+ name = "baml_rt_provenance"
+ path = "src/lib.rs"
+ 
+ [dependencies]
+ baml-rt-core = { path = "../baml-rt-core" }
+ baml-rt-interceptor = { path = "../baml-rt-interceptor" }
+ serde = { workspace = true }
+ serde_json = { workspace = true }
+ tokio = { workspace = true }
+ async-trait = { workspace = true }
+ thiserror = { workspace = true }
+ tracing = { workspace = true }

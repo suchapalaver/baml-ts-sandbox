@@ -7,6 +7,7 @@ use baml_rt_tools::{ToolRegistry as ConcreteToolRegistry, ToolMetadata, ToolMapp
 use crate::traits::{BamlFunctionExecutor, SchemaLoader};
 use baml_rt_interceptor::InterceptorRegistry;
 use baml_rt_core::correlation::current_correlation_id;
+use baml_rt_core::context;
 use baml_rt_observability::metrics;
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -120,7 +121,7 @@ impl BamlRuntimeManager {
         args: serde_json::Value,
     ) -> Result<serde_json::Value> {
         let correlation_id = current_correlation_id();
-        if let Some(correlation_id) = correlation_id.as_deref() {
+        if let Some(correlation_id) = correlation_id.as_ref().map(|id| id.as_str()) {
             tracing::debug!(
                 function = function_name,
                 args = ?args,
@@ -260,6 +261,7 @@ impl BamlRuntimeManager {
             function_name: None, // Could be enhanced to track which function called this tool
             args: args.clone(),
             metadata,
+            context_id: context::current_or_new(),
         };
 
         // Run interceptors before execution

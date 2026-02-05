@@ -2,6 +2,12 @@ use crate::a2a_types::{
     Artifact, ListTasksRequest, ListTasksResponse, Message, Task, TaskArtifactUpdateEvent,
     TaskState, TaskStatus, TaskStatusUpdateEvent, TASK_STATE_CANCELED,
 };
+use async_trait::async_trait;
+use baml_rt_core::context;
+use baml_rt_core::ids::{ContextId, TaskId};
+use baml_rt_provenance::{ProvEvent, ProvenanceWriter};
+use tokio::sync::Mutex;
+use std::sync::Arc;
 use std::collections::HashMap;
 
 #[derive(Debug, Clone)]
@@ -13,8 +19,8 @@ pub enum TaskUpdateEvent {
 impl TaskUpdateEvent {
     pub fn task_id(&self) -> Option<&str> {
         match self {
-            TaskUpdateEvent::Status(event) => event.task_id.as_deref(),
-            TaskUpdateEvent::Artifact(event) => event.task_id.as_deref(),
+            TaskUpdateEvent::Status(event) => event.task_id.as_ref().map(|id| id.as_str()),
+            TaskUpdateEvent::Artifact(event) => event.task_id.as_ref().map(|id| id.as_str()),
         }
     }
 }
@@ -26,6 +32,223 @@ pub struct TaskStore {
     updates: HashMap<String, Vec<TaskUpdateEvent>>,
 }
 
+#[async_trait]
+pub trait TaskRepository: Send + Sync {
+    async fn upsert(&self, task: Task) -> Option<Task>;
+    async fn get(&self, id: &str, history_length: Option<usize>) -> Option<Task>;
+    async fn list(&self, request: &ListTasksRequest) -> ListTasksResponse;
+    async fn cancel(&self, id: &str) -> Option<Task>;
+    async fn insert_message(&self, message: &Message);
+}
+
+#[async_trait]
+pub trait TaskEventRecorder: Send + Sync {
+    async fn record_status_update(
+        &self,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
+        status: TaskStatus,
+    ) -> Option<TaskUpdateEvent>;
+    async fn record_artifact_update(
+        &self,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
+        artifact: Artifact,
+        append: Option<bool>,
+        last_chunk: Option<bool>,
+    ) -> Option<TaskUpdateEvent>;
+}
+
+#[async_trait]
+pub trait TaskUpdateQueue: Send + Sync {
+    async fn drain_updates(&self, task_id: &str) -> Vec<TaskUpdateEvent>;
+}
+
+#[async_trait]
+pub trait TaskStoreBackend: TaskRepository + TaskEventRecorder + TaskUpdateQueue {}
+
+impl<T> TaskStoreBackend for T where T: TaskRepository + TaskEventRecorder + TaskUpdateQueue {}
+
+#[async_trait]
+impl TaskRepository for Mutex<TaskStore> {
+    async fn upsert(&self, task: Task) -> Option<Task> {
+        let mut store = self.lock().await;
+        store.upsert(task)
+    }
+
+    async fn get(&self, id: &str, history_length: Option<usize>) -> Option<Task> {
+        let store = self.lock().await;
+        store.get(id, history_length)
+    }
+
+    async fn list(&self, request: &ListTasksRequest) -> ListTasksResponse {
+        let store = self.lock().await;
+        store.list(request)
+    }
+
+    async fn cancel(&self, id: &str) -> Option<Task> {
+        let mut store = self.lock().await;
+        store.cancel(id)
+    }
+
+    async fn insert_message(&self, message: &Message) {
+        let mut store = self.lock().await;
+        store.insert_message(message);
+    }
+}
+
+#[async_trait]
+impl TaskEventRecorder for Mutex<TaskStore> {
+    async fn record_status_update(
+        &self,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
+        status: TaskStatus,
+    ) -> Option<TaskUpdateEvent> {
+        let mut store = self.lock().await;
+        store.record_status_update(task_id, context_id, status)
+    }
+
+    async fn record_artifact_update(
+        &self,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
+        artifact: Artifact,
+        append: Option<bool>,
+        last_chunk: Option<bool>,
+    ) -> Option<TaskUpdateEvent> {
+        let mut store = self.lock().await;
+        store.record_artifact_update(task_id, context_id, artifact, append, last_chunk)
+    }
+
+}
+
+#[async_trait]
+impl TaskUpdateQueue for Mutex<TaskStore> {
+    async fn drain_updates(&self, task_id: &str) -> Vec<TaskUpdateEvent> {
+        let mut store = self.lock().await;
+        store.drain_updates(task_id)
+    }
+}
+
+pub struct ProvenanceTaskStore {
+    inner: Mutex<TaskStore>,
+    writer: Option<Arc<dyn ProvenanceWriter>>,
+}
+
+impl ProvenanceTaskStore {
+    pub fn new(writer: Option<Arc<dyn ProvenanceWriter>>) -> Self {
+        Self {
+            inner: Mutex::new(TaskStore::new()),
+            writer,
+        }
+    }
+
+    async fn record_event(&self, event: ProvEvent) {
+        if let Some(writer) = &self.writer {
+            writer.add_event_with_logging(event, "task store operation").await;
+        }
+    }
+}
+
+#[async_trait]
+impl TaskRepository for ProvenanceTaskStore {
+    async fn upsert(&self, task: Task) -> Option<Task> {
+        let context_id = task
+            .context_id
+            .clone()
+            .unwrap_or_else(context::current_or_new);
+        if let Some(task_id) = task.id.clone() {
+            let event = ProvEvent::task_created(context_id, task_id, None);
+            self.record_event(event).await;
+        }
+        let mut store = self.inner.lock().await;
+        store.upsert(task)
+    }
+
+    async fn get(&self, id: &str, history_length: Option<usize>) -> Option<Task> {
+        let store = self.inner.lock().await;
+        store.get(id, history_length)
+    }
+
+    async fn list(&self, request: &ListTasksRequest) -> ListTasksResponse {
+        let store = self.inner.lock().await;
+        store.list(request)
+    }
+
+    async fn cancel(&self, id: &str) -> Option<Task> {
+        let mut store = self.inner.lock().await;
+        store.cancel(id)
+    }
+
+    async fn insert_message(&self, message: &Message) {
+        let mut store = self.inner.lock().await;
+        store.insert_message(message);
+    }
+}
+
+#[async_trait]
+impl TaskEventRecorder for ProvenanceTaskStore {
+    async fn record_status_update(
+        &self,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
+        status: TaskStatus,
+    ) -> Option<TaskUpdateEvent> {
+        if let Some(task_id) = task_id.clone() {
+            let event = ProvEvent::task_status_changed(
+                context_id.clone().unwrap_or_else(context::current_or_new),
+                task_id,
+                None,
+                status_to_string(&status),
+            );
+            self.record_event(event).await;
+        }
+        let mut store = self.inner.lock().await;
+        store.record_status_update(task_id, context_id, status)
+    }
+
+    async fn record_artifact_update(
+        &self,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
+        artifact: Artifact,
+        append: Option<bool>,
+        last_chunk: Option<bool>,
+    ) -> Option<TaskUpdateEvent> {
+        if let Some(task_id) = task_id.clone() {
+            let event = ProvEvent::task_artifact_generated(
+                context_id.clone().unwrap_or_else(context::current_or_new),
+                task_id,
+                artifact.artifact_id.clone(),
+                artifact.name.clone(),
+            );
+            self.record_event(event).await;
+        }
+        let mut store = self.inner.lock().await;
+        store.record_artifact_update(task_id, context_id, artifact, append, last_chunk)
+    }
+
+}
+
+#[async_trait]
+impl TaskUpdateQueue for ProvenanceTaskStore {
+    async fn drain_updates(&self, task_id: &str) -> Vec<TaskUpdateEvent> {
+        let mut store = self.inner.lock().await;
+        store.drain_updates(task_id)
+    }
+}
+
+fn status_to_string(status: &TaskStatus) -> Option<String> {
+    status
+        .state
+        .as_ref()
+        .map(|state| match state {
+            TaskState::String(value) => value.clone(),
+            TaskState::Integer(value) => value.to_string(),
+        })
+}
+
 impl TaskStore {
     pub fn new() -> Self {
         Self::default()
@@ -33,10 +256,11 @@ impl TaskStore {
 
     pub fn upsert(&mut self, task: Task) -> Option<Task> {
         let id = task.id.clone()?;
-        if !self.tasks.contains_key(&id) {
-            self.order.push(id.clone());
+        let id_str = id.as_str();
+        if !self.tasks.contains_key(id_str) {
+            self.order.push(id_str.to_string());
         }
-        self.tasks.insert(id.clone(), task.clone());
+        self.tasks.insert(id_str.to_string(), task.clone());
         Some(task)
     }
 
@@ -56,7 +280,7 @@ impl TaskStore {
             .collect();
 
         if let Some(context_id) = &request.context_id {
-            tasks.retain(|task| task.context_id.as_deref() == Some(context_id.as_str()));
+            tasks.retain(|task| task.context_id.as_ref().map(|id| id.as_str()) == Some(context_id.as_str()));
         }
 
         if let Some(status) = &request.status {
@@ -119,7 +343,7 @@ impl TaskStore {
 
     pub fn insert_message(&mut self, message: &Message) {
         if let Some(task_id) = &message.task_id
-            && let Some(task) = self.tasks.get_mut(task_id)
+            && let Some(task) = self.tasks.get_mut(task_id.as_str())
         {
             task.history.push(message.clone());
         }
@@ -127,11 +351,12 @@ impl TaskStore {
 
     pub fn record_status_update(
         &mut self,
-        task_id: Option<String>,
-        context_id: Option<String>,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
         status: TaskStatus,
     ) -> Option<TaskUpdateEvent> {
         if let Some(task_id) = task_id {
+            let task_id_str = task_id.as_str().to_string();
             let update = TaskStatusUpdateEvent {
                 context_id,
                 task_id: Some(task_id.clone()),
@@ -141,7 +366,7 @@ impl TaskStore {
             };
             let event = TaskUpdateEvent::Status(update.clone());
             self.updates
-                .entry(task_id)
+                .entry(task_id_str)
                 .or_default()
                 .push(event.clone());
             return Some(event);
@@ -151,13 +376,14 @@ impl TaskStore {
 
     pub fn record_artifact_update(
         &mut self,
-        task_id: Option<String>,
-        context_id: Option<String>,
+        task_id: Option<TaskId>,
+        context_id: Option<ContextId>,
         artifact: Artifact,
         append: Option<bool>,
         last_chunk: Option<bool>,
     ) -> Option<TaskUpdateEvent> {
         if let Some(task_id) = task_id {
+            let task_id_str = task_id.as_str().to_string();
             let update = TaskArtifactUpdateEvent {
                 context_id,
                 task_id: Some(task_id.clone()),
@@ -169,7 +395,7 @@ impl TaskStore {
             };
             let event = TaskUpdateEvent::Artifact(update.clone());
             self.updates
-                .entry(task_id)
+                .entry(task_id_str)
                 .or_default()
                 .push(event.clone());
             return Some(event);

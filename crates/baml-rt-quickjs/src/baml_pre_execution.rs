@@ -4,6 +4,7 @@
 //! to intercept LLM calls before the HTTP request is sent.
 
 use baml_rt_core::{BamlRtError, Result};
+use baml_rt_core::context;
 use baml_rt_interceptor::{InterceptorDecision, InterceptorRegistry, LLMCallContext};
 use baml_runtime::RuntimeContextManager;
 use baml_types::{BamlMap, BamlValue};
@@ -49,6 +50,7 @@ pub fn extract_context_from_http_request(
         client,
         model,
         function_name: function_name.to_string(),
+        context_id: context::current_or_new(),
         prompt,
         metadata: json!({
             "url": http_request.url.clone(),

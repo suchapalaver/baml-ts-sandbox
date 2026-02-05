@@ -24,14 +24,15 @@ fn fixture_js_code() -> String {
 }
 
 fn user_message(message_id: &str, text: &str) -> Message {
+    use baml_rt_core::ids::{ContextId, MessageId};
     Message {
-        message_id: message_id.to_string(),
+        message_id: MessageId::from(message_id),
         role: MessageRole::String("ROLE_USER".to_string()),
         parts: vec![Part {
             text: Some(text.to_string()),
             ..Part::default()
         }],
-        context_id: Some("ctx-void-001".to_string()),
+        context_id: Some(ContextId::from("ctx-void-001")),
         task_id: None,
         reference_task_ids: Vec::new(),
         extensions: Vec::new(),

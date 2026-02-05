@@ -1073,9 +1073,11 @@ dependencies = [
  "baml-rt",
  "baml-rt-core",
  "baml-rt-observability",
+ "baml-rt-provenance",
  "baml-rt-quickjs",
  "baml-rt-tools",
  "futures-util",
+ "insta",
  "opentelemetry",
  "opentelemetry_sdk",
  "serde",
@@ -1157,6 +1159,20 @@ dependencies = [
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "baml-rt-provenance"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "baml-rt-core",
+ "baml-rt-interceptor",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3604,6 +3620,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e05c02b5e89bff3b946cedeca278abc628fe811e604f027c45a8aa3cf793d0eb"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "insta"
+version = "1.46.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e82db8c87c7f1ccecb34ce0c24399b8a73081427f3c7c50a5d597925356115e4"
+dependencies = [
+ "console",
+ "once_cell",
+ "similar",
+ "tempfile",
 ]
 
 [[package]]

@@ -1,3 +1,4 @@
+use baml_rt_core::ids::{ArtifactId, ContextId, MessageId, TaskId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -103,15 +104,15 @@ pub struct Part {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
-    pub message_id: String,
+    pub message_id: MessageId,
     pub role: MessageRole,
     pub parts: Vec<Part>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub context_id: Option<String>,
+    pub context_id: Option<ContextId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub task_id: Option<TaskId>,
     #[serde(default)]
-    pub reference_task_ids: Vec<String>,
+    pub reference_task_ids: Vec<TaskId>,
     #[serde(default)]
     pub extensions: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -124,7 +125,7 @@ pub struct Message {
 #[serde(rename_all = "camelCase")]
 pub struct Artifact {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub artifact_id: Option<String>,
+    pub artifact_id: Option<ArtifactId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -156,9 +157,9 @@ pub struct TaskStatus {
 #[serde(rename_all = "camelCase")]
 pub struct Task {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    pub id: Option<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_id: Option<String>,
+    pub context_id: Option<ContextId>,
     #[serde(default)]
     pub artifacts: Vec<Artifact>,
     #[serde(default)]
@@ -212,7 +213,7 @@ pub struct SendMessageResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GetTaskRequest {
-    pub id: String,
+    pub id: TaskId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_length: Option<NumberOrString>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -225,7 +226,7 @@ pub struct GetTaskRequest {
 #[serde(rename_all = "camelCase")]
 pub struct ListTasksRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_id: Option<String>,
+    pub context_id: Option<ContextId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub history_length: Option<NumberOrString>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -262,7 +263,7 @@ pub struct ListTasksResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CancelTaskRequest {
-    pub id: String,
+    pub id: TaskId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
     #[serde(flatten)]
@@ -272,7 +273,7 @@ pub struct CancelTaskRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SubscribeToTaskRequest {
-    pub id: String,
+    pub id: TaskId,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tenant: Option<String>,
     #[serde(flatten)]
@@ -283,9 +284,9 @@ pub struct SubscribeToTaskRequest {
 #[serde(rename_all = "camelCase")]
 pub struct TaskStatusUpdateEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_id: Option<String>,
+    pub context_id: Option<ContextId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub task_id: Option<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<TaskStatus>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -298,9 +299,9 @@ pub struct TaskStatusUpdateEvent {
 #[serde(rename_all = "camelCase")]
 pub struct TaskArtifactUpdateEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub context_id: Option<String>,
+    pub context_id: Option<ContextId>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub task_id: Option<String>,
+    pub task_id: Option<TaskId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_chunk: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

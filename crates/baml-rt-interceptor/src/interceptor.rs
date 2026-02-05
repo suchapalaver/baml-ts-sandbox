@@ -4,6 +4,7 @@
 //! LLM calls and tool executions for governance, tracing, and security purposes.
 
 use baml_rt_core::{BamlRtError, Result};
+use baml_rt_core::ids::ContextId;
 use serde_json::Value;
 use std::sync::Arc;
 use async_trait::async_trait;
@@ -31,6 +32,9 @@ pub struct LLMCallContext {
     /// The function name that triggered this LLM call
     pub function_name: String,
 
+    /// The active context ID for this call
+    pub context_id: ContextId,
+
     /// The prompt/messages being sent
     pub prompt: Value,
 
@@ -49,6 +53,9 @@ pub struct ToolCallContext {
 
     /// The tool arguments
     pub args: Value,
+
+    /// The active context ID for this call
+    pub context_id: ContextId,
 
     /// Additional metadata
     pub metadata: Value,

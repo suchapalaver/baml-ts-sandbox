@@ -7,6 +7,8 @@ use crate::baml::BamlRuntimeManager;
 use baml_rt_core::{BamlRtError, Result};
 use crate::js_value_converter::value_to_js_value_facade;
 use baml_rt_core::correlation;
+use baml_rt_core::context;
+use baml_rt_core::ids::ContextId;
 use quickjs_runtime::builder::QuickJsRuntimeBuilder;
 use quickjs_runtime::facades::QuickJsRuntimeFacade;
 use quickjs_runtime::jsutils::Script;
@@ -204,7 +206,7 @@ impl QuickJSBridge {
                         argObj[`arg${{idx}}`] = arg;
                     }});
                 }}
-                return await __tool_invoke("{}", JSON.stringify(argObj));
+                return await __tool_invoke("{}", JSON.stringify(argObj), globalThis.__baml_context_id);
             }};
             "#,
             tool_name, tool_name
@@ -253,12 +255,22 @@ impl QuickJSBridge {
                 let args_json: Value = serde_json::from_str(&args_json_str)
                     .map_err(|e| quickjs_runtime::jsutils::JsError::new_str(&format!("Failed to parse JSON args: {}", e)))?;
 
+                let context_id_arg = args.get(2).and_then(|value| {
+                    if value.is_string() {
+                        Some(ContextId::from(value.get_str()))
+                    } else {
+                        None
+                    }
+                });
+
                 let tool_name_clone = tool_name.clone();
                 let manager_for_promise = manager_clone.clone();
                 let correlation_id = correlation::current_or_new();
+                let context_id = context_id_arg.unwrap_or_else(context::current_or_new);
 
                 Ok(JsValueFacade::new_promise::<JsValueFacade, _, ()>(async move {
                     correlation::with_correlation_id(correlation_id, async move {
+                        context::with_context_id(context_id, async move {
                         let manager = manager_for_promise.lock().await;
                         let result = manager.execute_tool(&tool_name_clone, args_json).await;
 
@@ -272,6 +284,8 @@ impl QuickJSBridge {
                                 Err(quickjs_runtime::jsutils::JsError::new_str(&error_msg))
                             }
                         }
+                        })
+                        .await
                     })
                     .await
                 }))
@@ -303,9 +317,17 @@ impl QuickJSBridge {
 
                 let manager_for_promise = manager_clone.clone();
                 let correlation_id = correlation::current_or_new();
+                let context_id = args.get(1).and_then(|value| {
+                    if value.is_string() {
+                        Some(ContextId::from(value.get_str()))
+                    } else {
+                        None
+                    }
+                }).unwrap_or_else(context::current_or_new);
 
                 Ok(JsValueFacade::new_promise::<JsValueFacade, _, ()>(async move {
                     correlation::with_correlation_id(correlation_id, async move {
+                        context::with_context_id(context_id, async move {
                         let manager = manager_for_promise.lock().await;
                         let result = manager.execute_tool_from_baml_result(baml_result).await;
 
@@ -317,6 +339,8 @@ impl QuickJSBridge {
                                 Err(quickjs_runtime::jsutils::JsError::new_str(&error_msg))
                             }
                         }
+                        })
+                        .await
                     })
                     .await
                 }))
@@ -345,7 +369,7 @@ impl QuickJSBridge {
                 } else {
                     // Rust tool - use __tool_invoke
                     const argsJson = JSON.stringify(argsObj);
-                    return await __tool_invoke(toolName, argsJson);
+                    return await __tool_invoke(toolName, argsJson, globalThis.__baml_context_id);
                 }
             };
         "#;
@@ -1029,11 +1053,19 @@ impl QuickJSBridge {
     pub async fn invoke_js_tool(&mut self, tool_name: &str, args: Value) -> Result<Value> {
         let args_json = serde_json::to_string(&args)
             .map_err(BamlRtError::Json)?;
+        let context_prelude = match context::current_context_id() {
+            Some(id) => format!(
+                "globalThis.__baml_context_id = {};",
+                serde_json::to_string(&id).map_err(BamlRtError::Json)?
+            ),
+            None => "delete globalThis.__baml_context_id;".to_string(),
+        };
 
         let js_code = format!(
             r#"
             (function() {{
                 try {{
+                    {}
                     const args = {};
                     const func = globalThis["{}"];
                     if (func === undefined || typeof func !== 'function') {{
@@ -1045,7 +1077,7 @@ impl QuickJSBridge {
                 }}
             }})()
             "#,
-            args_json, tool_name
+            context_prelude, args_json, tool_name
         );
 
         if correlation::current_correlation_id().is_some() {
@@ -1061,11 +1093,19 @@ impl QuickJSBridge {
 
     pub async fn invoke_js_function(&mut self, function_name: &str, args: Value) -> Result<Value> {
         let args_json = serde_json::to_string(&args).map_err(BamlRtError::Json)?;
+        let context_prelude = match context::current_context_id() {
+            Some(id) => format!(
+                "globalThis.__baml_context_id = {};",
+                serde_json::to_string(&id).map_err(BamlRtError::Json)?
+            ),
+            None => "delete globalThis.__baml_context_id;".to_string(),
+        };
 
         let js_code = format!(
             r#"
             (function() {{
                 try {{
+                    {}
                     const args = {};
                     const func = globalThis["{}"];
                     if (func === undefined || typeof func !== 'function') {{
@@ -1077,7 +1117,7 @@ impl QuickJSBridge {
                 }}
             }})()
             "#,
-            args_json, function_name
+            context_prelude, args_json, function_name
         );
 
         let result = if correlation::current_correlation_id().is_some() {
@@ -1105,11 +1145,19 @@ impl QuickJSBridge {
         args: Value,
     ) -> Result<Option<Value>> {
         let args_json = serde_json::to_string(&args).map_err(BamlRtError::Json)?;
+        let context_prelude = match context::current_context_id() {
+            Some(id) => format!(
+                "globalThis.__baml_context_id = {};",
+                serde_json::to_string(&id).map_err(BamlRtError::Json)?
+            ),
+            None => "delete globalThis.__baml_context_id;".to_string(),
+        };
 
         let js_code = format!(
             r#"
             (function() {{
                 try {{
+                    {}
                     const args = {};
                     const func = globalThis["{}"];
                     if (func === undefined || typeof func !== 'function') {{
@@ -1121,7 +1169,7 @@ impl QuickJSBridge {
                 }}
             }})()
             "#,
-            args_json, function_name
+            context_prelude, args_json, function_name
         );
 
         let result = if correlation::current_correlation_id().is_some() {

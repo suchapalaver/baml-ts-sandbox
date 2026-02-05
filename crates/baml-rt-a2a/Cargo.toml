@@ -9,6 +9,7 @@ baml-rt-core = { path = "../baml-rt-core" }
 baml-rt-tools = { path = "../baml-rt-tools" }
 baml-rt-quickjs = { path = "../baml-rt-quickjs" }
 baml-rt-observability = { path = "../baml-rt-observability" }
+baml-rt-provenance = { path = "../baml-rt-provenance" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -24,3 +25,4 @@ tracing-subscriber = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 test-support = { path = "../test-support" }
 baml-rt = { path = "../baml-rt" }
+insta = "1.46.3"

@@ -9,6 +9,7 @@
 //! to intercept LLM calls and route them through our interceptor system.
 
 use baml_rt_core::Result;
+use baml_rt_core::context;
 use baml_rt_interceptor::{InterceptorRegistry, LLMCallContext};
 use baml_runtime::tracingv2::storage::storage::Collector;
 use serde_json::json;
@@ -111,6 +112,7 @@ impl BamlLLMCollector {
             client,
             model,
             function_name: self.function_name.clone(),
+            context_id: context::current_or_new(),
             prompt,
             metadata: json!({
                 "usage": call.usage,

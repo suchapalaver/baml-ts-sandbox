@@ -1,20 +1,28 @@
 //! A2A request handler interface for non-standard transports.
 
 use crate::a2a;
-use crate::a2a_store::{TaskStore, TaskUpdateEvent};
-use crate::a2a_types::{
-    Artifact, CancelTaskRequest, GetTaskRequest, ListTasksRequest, ListTasksResponse,
-    SendMessageResponse, Message, StreamResponse, SubscribeToTaskRequest, Task,
-    TaskStatusUpdateEvent,
+use crate::a2a_store::{
+    ProvenanceTaskStore, TaskEventRecorder, TaskRepository, TaskStoreBackend, TaskUpdateQueue,
+    TaskUpdateEvent,
 };
+use crate::error_classifier::{A2aErrorClassifier, ErrorClassifier};
+use crate::events::{BroadcastEventEmitter, EventEmitter};
+use crate::handlers::{DefaultTaskHandler, TaskHandler};
+use crate::request_router::{MethodBasedRouter, QuickJsInvoker, RequestRouter};
+use crate::result_deduplicator::{DeduplicatingPipeline, HashResultDeduplicator, ResultDeduplicator};
+use crate::result_pipeline::{A2aResultPipeline, ResultStoragePipeline};
+use crate::response::{JsonRpcResponseFormatter, ResponseFormatter};
+use crate::stream_normalizer::{A2aStreamNormalizer, StreamNormalizer};
+ 
 use baml_rt_quickjs::{BamlRuntimeManager, QuickJSBridge, QuickJSConfig};
 use baml_rt_core::{BamlRtError, Result};
 use baml_rt_core::correlation;
+use baml_rt_core::context;
 use baml_rt_observability::{metrics, spans};
 use baml_rt_tools::{ToolExecutor, ToolMetadata};
+use baml_rt_provenance::{InMemoryProvenanceStore, ProvenanceInterceptor, ProvenanceWriter};
 use async_trait::async_trait;
-use serde_json::{json, Value};
-use std::collections::HashMap;
+use serde_json::Value;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::sync::Mutex;
@@ -24,7 +32,11 @@ use tokio::sync::Mutex;
 pub struct A2aAgent {
     runtime: Arc<Mutex<BamlRuntimeManager>>,
     bridge: Arc<Mutex<QuickJSBridge>>,
-    task_store: Arc<Mutex<TaskStore>>,
+    task_store: Arc<dyn TaskStoreBackend>,
+    provenance_writer: Option<Arc<dyn ProvenanceWriter>>,
+    response_formatter: Arc<dyn ResponseFormatter>,
+    request_router: Arc<dyn RequestRouter>,
+    error_classifier: Arc<dyn ErrorClassifier>,
     update_tx: broadcast::Sender<TaskUpdateEvent>,
 }
 
@@ -50,8 +62,13 @@ impl A2aAgent {
     }
 
     /// Access the task store for this agent instance.
-    pub fn task_store(&self) -> Arc<Mutex<TaskStore>> {
+    pub fn task_store(&self) -> Arc<dyn TaskStoreBackend> {
         self.task_store.clone()
+    }
+
+    /// Access the provenance writer, if configured.
+    pub fn provenance_writer(&self) -> Option<Arc<dyn ProvenanceWriter>> {
+        self.provenance_writer.clone()
     }
 
     /// Subscribe to task update events for this agent instance.
@@ -108,6 +125,8 @@ pub struct A2aAgentBuilder {
     quickjs_config: QuickJSConfig,
     register_baml_functions: bool,
     init_js: Vec<String>,
+    task_store: Option<Arc<dyn TaskStoreBackend>>,
+    provenance_writer: Option<Arc<dyn ProvenanceWriter>>,
 }
 
 impl A2aAgentBuilder {
@@ -118,6 +137,8 @@ impl A2aAgentBuilder {
             quickjs_config: QuickJSConfig::default(),
             register_baml_functions: true,
             init_js: Vec::new(),
+            task_store: None,
+            provenance_writer: None,
         }
     }
 
@@ -157,6 +178,18 @@ impl A2aAgentBuilder {
         self
     }
 
+    /// Provide a custom task store backend.
+    pub fn with_task_store_backend(mut self, task_store: Arc<dyn TaskStoreBackend>) -> Self {
+        self.task_store = Some(task_store);
+        self
+    }
+
+    /// Provide a custom provenance writer.
+    pub fn with_provenance_writer(mut self, writer: Arc<dyn ProvenanceWriter>) -> Self {
+        self.provenance_writer = Some(writer);
+        self
+    }
+
     /// Build the agent with the configured subcomponents.
     pub async fn build(self) -> Result<A2aAgent> {
         if self.bridge.is_some() && self.runtime.is_none() {
@@ -190,10 +223,67 @@ impl A2aAgentBuilder {
         }
 
         let (update_tx, _update_rx) = broadcast::channel(256);
+
+        let (task_store, provenance_writer) = match (self.task_store, self.provenance_writer) {
+            (Some(task_store), provenance_writer) => (task_store, provenance_writer),
+            (None, None) => {
+                let writer: Arc<dyn ProvenanceWriter> =
+                    Arc::new(InMemoryProvenanceStore::new());
+                let store: Arc<dyn TaskStoreBackend> =
+                    Arc::new(ProvenanceTaskStore::new(Some(writer.clone())));
+                (store, Some(writer))
+            }
+            (None, Some(writer)) => {
+                let store: Arc<dyn TaskStoreBackend> =
+                    Arc::new(ProvenanceTaskStore::new(Some(writer.clone())));
+                (store, Some(writer))
+            }
+        };
+
+        let emitter: Arc<dyn EventEmitter> = Arc::new(BroadcastEventEmitter::new(update_tx.clone()));
+        let result_pipeline: Arc<dyn ResultStoragePipeline> =
+            Arc::new(A2aResultPipeline::new(task_store.clone(), emitter.clone()));
+        let deduplicator: Arc<dyn ResultDeduplicator> = Arc::new(HashResultDeduplicator::new());
+        let result_pipeline: Arc<dyn ResultStoragePipeline> =
+            Arc::new(DeduplicatingPipeline::new(result_pipeline, deduplicator));
+        let response_formatter: Arc<dyn ResponseFormatter> = Arc::new(JsonRpcResponseFormatter);
+        let stream_normalizer: Arc<dyn StreamNormalizer> = Arc::new(A2aStreamNormalizer);
+        let repository: Arc<dyn TaskRepository> = task_store.clone();
+        let recorder: Arc<dyn TaskEventRecorder> = task_store.clone();
+        let update_queue: Arc<dyn TaskUpdateQueue> = task_store.clone();
+        let task_handler: Arc<dyn TaskHandler> = Arc::new(DefaultTaskHandler::new(
+            repository,
+            recorder,
+            update_queue,
+            bridge.clone(),
+            emitter.clone(),
+        ));
+        let js_invoker: Arc<dyn crate::request_router::JsInvoker> = Arc::new(QuickJsInvoker::new(
+            bridge.clone(),
+            stream_normalizer.clone(),
+        ));
+        let request_router: Arc<dyn RequestRouter> = Arc::new(MethodBasedRouter::new(
+            task_handler.clone(),
+            js_invoker,
+            result_pipeline.clone(),
+        ));
+        let error_classifier: Arc<dyn ErrorClassifier> = Arc::new(A2aErrorClassifier);
+
+        if let Some(writer) = provenance_writer.clone() {
+            let runtime_guard = runtime.lock().await;
+            runtime_guard.register_llm_interceptor(ProvenanceInterceptor::new(writer.clone())).await;
+            runtime_guard
+                .register_tool_interceptor(ProvenanceInterceptor::new(writer))
+                .await;
+        }
         Ok(A2aAgent {
             runtime,
             bridge,
-            task_store: Arc::new(Mutex::new(TaskStore::new())),
+            task_store,
+            provenance_writer,
+            response_formatter,
+            request_router,
+            error_classifier,
             update_tx,
         })
     }
@@ -220,46 +310,33 @@ impl A2aRequestHandler for A2aAgent {
         let parsed_request = match a2a::A2aRequest::from_value(request) {
             Ok(parsed) => parsed,
             Err(err) => {
-                let (code, message, data) = map_jsonrpc_error(&err);
-                return Ok(vec![a2a::error_response(request_id, code, message, data)]);
+                let formatter = JsonRpcResponseFormatter;
+                return Ok(vec![formatter.format_error(request_id, &err)]);
             }
         };
+        use baml_rt_core::ids::CorrelationId;
         let correlation_id = parsed_request
             .correlation_id()
+            .map(|s| CorrelationId::from(s))
             .unwrap_or_else(correlation::generate_correlation_id);
 
         let span = if parsed_request.is_stream {
-            spans::a2a_stream(parsed_request.method.as_str(), &correlation_id)
+            spans::a2a_stream(parsed_request.method.as_str(), correlation_id.as_str())
         } else {
-            spans::a2a_request(parsed_request.method.as_str(), &correlation_id)
+            spans::a2a_request(parsed_request.method.as_str(), correlation_id.as_str())
         };
         let _guard = span.enter();
         let start = std::time::Instant::now();
         let method = parsed_request.method;
         let is_stream = parsed_request.is_stream;
 
+        let request_context_id =
+            parsed_request.context_id.clone().unwrap_or_else(context::generate_context_id);
         let outcome = correlation::with_correlation_id(correlation_id, async move {
-            match parsed_request.method {
-                a2a::A2aMethod::TasksGet => self.handle_tasks_get(parsed_request.params).await,
-                a2a::A2aMethod::TasksList => self.handle_tasks_list(parsed_request.params).await,
-                a2a::A2aMethod::TasksCancel => self.handle_tasks_cancel(parsed_request.params).await,
-                a2a::A2aMethod::TasksSubscribe => self
-                    .handle_tasks_subscribe(parsed_request.params, parsed_request.is_stream)
-                    .await,
-                _ => {
-                    if parsed_request.is_stream {
-                        let chunks = self.invoke_a2a_stream(&parsed_request).await?;
-                        for chunk in &chunks {
-                            self.store_a2a_result(chunk).await?;
-                        }
-                        Ok(a2a::A2aOutcome::Stream(chunks))
-                    } else {
-                        let result = self.invoke_a2a_handler(&parsed_request).await?;
-                        self.store_a2a_result(&result).await?;
-                        Ok(a2a::A2aOutcome::Response(result))
-                    }
-                }
-            }
+            context::with_context_id(request_context_id, async move {
+                self.request_router.route(&parsed_request).await
+            })
+            .await
         })
         .await;
 
@@ -272,31 +349,22 @@ impl A2aRequestHandler for A2aAgent {
             Ok(_) => metrics::record_a2a_request(method.as_str(), "success", is_stream, duration),
             Err(err) => {
                 metrics::record_a2a_request(method.as_str(), "error", is_stream, duration);
-                metrics::record_a2a_error(method.as_str(), classify_a2a_error(err), is_stream);
+                metrics::record_a2a_error(
+                    method.as_str(),
+                    self.error_classifier.classify(err),
+                    is_stream,
+                );
             }
         }
 
         let responses = match outcome {
             Ok(a2a::A2aOutcome::Response(result)) => {
-                vec![a2a::success_response(request_id, result)]
+                vec![self.response_formatter.format_success(request_id, result)]
             }
             Ok(a2a::A2aOutcome::Stream(chunks)) => {
-                let total = chunks.len();
-                let mut responses = Vec::with_capacity(total);
-                for (idx, chunk) in chunks.into_iter().enumerate() {
-                    responses.push(a2a::stream_chunk_response(
-                        request_id.clone(),
-                        chunk,
-                        idx,
-                        idx + 1 == total,
-                    ));
-                }
-                responses
+                self.response_formatter.format_stream(request_id, chunks)
             }
-            Err(err) => {
-                let (code, message, data) = map_jsonrpc_error(&err);
-                vec![a2a::error_response(request_id, code, message, data)]
-            }
+            Err(err) => vec![self.response_formatter.format_error(request_id, &err)],
         };
 
         Ok(responses)
@@ -304,363 +372,7 @@ impl A2aRequestHandler for A2aAgent {
 }
 
 impl A2aAgent {
-    async fn invoke_a2a_handler(&self, request: &a2a::A2aRequest) -> Result<Value> {
-        let js_request = a2a::request_to_js_value(request);
-        let mut bridge = self.bridge.lock().await;
-        bridge.invoke_js_function("handle_a2a_request", js_request).await
-    }
-
-    async fn invoke_a2a_stream(&self, request: &a2a::A2aRequest) -> Result<Vec<Value>> {
-        let result = self.invoke_a2a_handler(request).await?;
-        match result {
-            Value::Array(values) => values
-                .into_iter()
-                .map(normalize_stream_chunk)
-                .collect::<Result<Vec<Value>>>(),
-            Value::Object(map) if map.get("error").is_some() => Err(BamlRtError::QuickJs(
-                map.get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown")
-                    .to_string(),
-            )),
-            other => Ok(vec![normalize_stream_chunk(other)?]),
-        }
-    }
-
-    async fn store_a2a_result(&self, value: &Value) -> Result<()> {
-        if (value.get("statusUpdate").is_some() || value.get("artifactUpdate").is_some())
-            && let Ok(stream) = serde_json::from_value::<StreamResponse>(value.clone())
-        {
-            let mut store = self.task_store.lock().await;
-            if let Some(task) = stream.task {
-                let status = task.status.clone();
-                let context_id = task.context_id.clone();
-                let task_id = task.id.clone();
-                let artifacts = task.artifacts.clone();
-                store.upsert(task);
-                if let Some(status) = status
-                    && let Some(event) = store.record_status_update(
-                        task_id.clone(),
-                        context_id.clone(),
-                        status,
-                    )
-                {
-                    self.emit_update(event);
-                }
-                if let Some(task_id) = task_id {
-                    self.emit_artifact_updates(&mut store, &task_id, context_id, artifacts);
-                }
-            }
-            if let Some(message) = stream.message {
-                store.insert_message(&message);
-            }
-            if let Some(TaskStatusUpdateEvent {
-                task_id,
-                context_id,
-                status: Some(status),
-                ..
-            }) = stream.status_update
-                && let Some(event) = store.record_status_update(task_id, context_id, status)
-            {
-                self.emit_update(event);
-            }
-            if let Some(artifact_update) = stream.artifact_update
-                && let Some(event) = store.record_artifact_update(
-                    artifact_update.task_id,
-                    artifact_update.context_id,
-                    artifact_update.artifact.unwrap_or_default(),
-                    artifact_update.append,
-                    artifact_update.last_chunk,
-                )
-            {
-                self.emit_update(event);
-            }
-            return Ok(());
-        }
-
-        if let Ok(response) = serde_json::from_value::<SendMessageResponse>(value.clone()) {
-            let mut store = self.task_store.lock().await;
-            if let Some(task) = response.task {
-                let status = task.status.clone();
-                let context_id = task.context_id.clone();
-                let task_id = task.id.clone();
-                let artifacts = task.artifacts.clone();
-                store.upsert(task);
-                if let Some(status) = status
-                    && let Some(event) = store.record_status_update(
-                        task_id.clone(),
-                        context_id.clone(),
-                        status,
-                    )
-                {
-                    self.emit_update(event);
-                }
-                if let Some(task_id) = task_id {
-                    self.emit_artifact_updates(&mut store, &task_id, context_id, artifacts);
-                }
-            }
-            if let Some(message) = response.message {
-                store.insert_message(&message);
-            }
-            return Ok(());
-        }
-
-        if let Ok(stream) = serde_json::from_value::<StreamResponse>(value.clone()) {
-            let mut store = self.task_store.lock().await;
-            if let Some(task) = stream.task {
-                let status = task.status.clone();
-                let context_id = task.context_id.clone();
-                let task_id = task.id.clone();
-                let artifacts = task.artifacts.clone();
-                store.upsert(task);
-                if let Some(status) = status
-                    && let Some(event) = store.record_status_update(
-                        task_id.clone(),
-                        context_id.clone(),
-                        status,
-                    )
-                {
-                    self.emit_update(event);
-                }
-                if let Some(task_id) = task_id {
-                    self.emit_artifact_updates(&mut store, &task_id, context_id, artifacts);
-                }
-            }
-            if let Some(message) = stream.message {
-                store.insert_message(&message);
-            }
-            if let Some(TaskStatusUpdateEvent {
-                task_id,
-                context_id,
-                status: Some(status),
-                ..
-            }) = stream.status_update
-                && let Some(event) = store.record_status_update(task_id, context_id, status)
-            {
-                self.emit_update(event);
-            }
-            if let Some(artifact_update) = stream.artifact_update
-                && let Some(event) = store.record_artifact_update(
-                    artifact_update.task_id,
-                    artifact_update.context_id,
-                    artifact_update.artifact.unwrap_or_default(),
-                    artifact_update.append,
-                    artifact_update.last_chunk,
-                )
-            {
-                self.emit_update(event);
-            }
-            return Ok(());
-        }
-
-        if let Ok(task) = serde_json::from_value::<Task>(value.clone()) {
-            let mut store = self.task_store.lock().await;
-            let status = task.status.clone();
-            let context_id = task.context_id.clone();
-            let task_id = task.id.clone();
-            let artifacts = task.artifacts.clone();
-            store.upsert(task);
-            if let Some(status) = status
-                && let Some(event) = store.record_status_update(
-                    task_id.clone(),
-                    context_id.clone(),
-                    status,
-                )
-            {
-                self.emit_update(event);
-            }
-            if let Some(task_id) = task_id {
-                self.emit_artifact_updates(&mut store, &task_id, context_id, artifacts);
-            }
-            return Ok(());
-        }
-
-        Ok(())
-    }
-
-    async fn handle_tasks_get(&self, params: Value) -> Result<a2a::A2aOutcome> {
-        let request: GetTaskRequest = serde_json::from_value(params).map_err(BamlRtError::Json)?;
-        let store = self.task_store.lock().await;
-        let history_length = request.history_length.and_then(|value| value.as_usize());
-        let task = store
-            .get(&request.id, history_length)
-            .ok_or_else(|| BamlRtError::InvalidArgument("Task not found".to_string()))?;
-        let value = serde_json::to_value(task).map_err(BamlRtError::Json)?;
-        Ok(a2a::A2aOutcome::Response(value))
-    }
-
-    async fn handle_tasks_list(&self, params: Value) -> Result<a2a::A2aOutcome> {
-        let request: ListTasksRequest = serde_json::from_value(params).map_err(BamlRtError::Json)?;
-        let store = self.task_store.lock().await;
-        let response: ListTasksResponse = store.list(&request);
-        let value = serde_json::to_value(response).map_err(BamlRtError::Json)?;
-        Ok(a2a::A2aOutcome::Response(value))
-    }
-
-    async fn handle_tasks_cancel(&self, params: Value) -> Result<a2a::A2aOutcome> {
-        let request: CancelTaskRequest =
-            serde_json::from_value(params).map_err(BamlRtError::Json)?;
-        let task = {
-            let mut store = self.task_store.lock().await;
-            let task = store
-                .cancel(&request.id)
-                .ok_or_else(|| BamlRtError::InvalidArgument("Task not found".to_string()))?;
-            if let Some(status) = task.status.clone()
-                && let Some(event) = store.record_status_update(
-                    task.id.clone(),
-                    task.context_id.clone(),
-                    status,
-                )
-            {
-                self.emit_update(event);
-            }
-            task
-        };
-
-        {
-            let mut bridge = self.bridge.lock().await;
-            let _ = bridge
-                .invoke_optional_js_function(
-                    "handle_a2a_cancel",
-                    serde_json::to_value(&request).map_err(BamlRtError::Json)?,
-                )
-                .await?;
-        }
-
-        let value = serde_json::to_value(task).map_err(BamlRtError::Json)?;
-        Ok(a2a::A2aOutcome::Response(value))
-    }
-
-    async fn handle_tasks_subscribe(
-        &self,
-        params: Value,
-        is_stream: bool,
-    ) -> Result<a2a::A2aOutcome> {
-        let request: SubscribeToTaskRequest =
-            serde_json::from_value(params).map_err(BamlRtError::Json)?;
-        let mut store = self.task_store.lock().await;
-        let task = store
-            .get(&request.id, None)
-            .ok_or_else(|| BamlRtError::InvalidArgument("Task not found".to_string()))?;
-        let value = serde_json::to_value(&task).map_err(BamlRtError::Json)?;
-
-        if is_stream {
-            let mut responses = Vec::new();
-            let status_update = task.status.as_ref().map(|status| TaskStatusUpdateEvent {
-                context_id: task.context_id.clone(),
-                task_id: task.id.clone(),
-                status: Some(status.clone()),
-                metadata: None,
-                extra: HashMap::new(),
-            });
-            let response = StreamResponse {
-                task: Some(task),
-                status_update,
-                message: None,
-                artifact_update: None,
-                extra: HashMap::new(),
-            };
-            responses.push(serde_json::to_value(response).map_err(BamlRtError::Json)?);
-
-            for update in store.drain_updates(&request.id) {
-                let stream_response = match update {
-                    TaskUpdateEvent::Status(status_update) => StreamResponse {
-                        status_update: Some(status_update),
-                        message: None,
-                        task: None,
-                        artifact_update: None,
-                        extra: HashMap::new(),
-                    },
-                    TaskUpdateEvent::Artifact(artifact_update) => StreamResponse {
-                        artifact_update: Some(artifact_update),
-                        message: None,
-                        task: None,
-                        status_update: None,
-                        extra: HashMap::new(),
-                    },
-                };
-                responses.push(serde_json::to_value(stream_response).map_err(BamlRtError::Json)?);
-            }
-
-            Ok(a2a::A2aOutcome::Stream(responses))
-        } else {
-            Ok(a2a::A2aOutcome::Response(value))
-        }
-    }
-}
-
-impl A2aAgent {
-    fn emit_update(&self, update: TaskUpdateEvent) {
-        let _ = self.update_tx.send(update);
-    }
-
-    fn emit_artifact_updates(
-        &self,
-        store: &mut TaskStore,
-        task_id: &str,
-        context_id: Option<String>,
-        artifacts: Vec<Artifact>,
-    ) {
-        for artifact in artifacts {
-            if let Some(event) = store.record_artifact_update(
-                Some(task_id.to_string()),
-                context_id.clone(),
-                artifact,
-                Some(false),
-                Some(true),
-            ) {
-                self.emit_update(event);
-            }
-        }
-    }
-}
-
-fn normalize_stream_chunk(value: Value) -> Result<Value> {
-    if is_stream_response(&value) {
-        return Ok(value);
-    }
-    if let Ok(message) = serde_json::from_value::<Message>(value.clone()) {
-        let response = StreamResponse {
-            message: Some(message),
-            task: None,
-            status_update: None,
-            artifact_update: None,
-            extra: HashMap::new(),
-        };
-        return serde_json::to_value(response).map_err(BamlRtError::Json);
-    }
-    if let Ok(task) = serde_json::from_value::<Task>(value.clone()) {
-        let response = StreamResponse {
-            task: Some(task),
-            message: None,
-            status_update: None,
-            artifact_update: None,
-            extra: HashMap::new(),
-        };
-        return serde_json::to_value(response).map_err(BamlRtError::Json);
-    }
-    Ok(value)
-}
-
-fn is_stream_response(value: &Value) -> bool {
-    let Some(map) = value.as_object() else {
-        return false;
-    };
-    map.contains_key("message")
-        || map.contains_key("task")
-        || map.contains_key("statusUpdate")
-        || map.contains_key("artifactUpdate")
-}
-
-fn classify_a2a_error(error: &BamlRtError) -> &'static str {
-    match error {
-        BamlRtError::InvalidArgument(_) => "invalid_argument",
-        BamlRtError::FunctionNotFound(_) => "function_not_found",
-        BamlRtError::QuickJs(_) => "quickjs",
-        BamlRtError::Json(_) => "json",
-        BamlRtError::ToolExecution(_) => "tool_execution",
-        _ => "internal",
-    }
+    // Result storage is handled by ResultStoragePipeline.
 }
 
 struct JsToolExecutor {
@@ -689,48 +401,6 @@ impl ToolExecutor for JsToolExecutor {
             context: "js tool join error".to_string(),
             source: Box::new(err),
         })?
-    }
-}
-
-fn map_jsonrpc_error(error: &BamlRtError) -> (i64, &'static str, Option<Value>) {
-    match error {
-        BamlRtError::InvalidArgument(message) => (
-            -32600,
-            "Invalid request",
-            Some(json!({
-                "error": error.to_string(),
-                "details": message,
-            })),
-        ),
-        BamlRtError::FunctionNotFound(name) => (
-            -32601,
-            "Method not found",
-            Some(json!({
-                "error": error.to_string(),
-                "function": name,
-            })),
-        ),
-        BamlRtError::Json(json_err) => (
-            -32700,
-            "Parse error",
-            Some(json!({
-                "error": error.to_string(),
-                "details": json_err.to_string(),
-            })),
-        ),
-        BamlRtError::QuickJsWithSource { context, .. } => (
-            -32603,
-            "Internal error",
-            Some(json!({
-                "error": error.to_string(),
-                "context": context,
-            })),
-        ),
-        _ => (
-            -32603,
-            "Internal error",
-            Some(json!({"error": error.to_string()})),
-        ),
     }
 }
 

@@ -4,6 +4,7 @@
 
 pub use baml_rt_core::{BamlRtError, Result};
 pub use baml_rt_core::correlation::{current_correlation_id, generate_correlation_id};
+pub use baml_rt_core::context::{current_context_id, generate_context_id};
 pub mod error {
     pub use baml_rt_core::error::*;
 }
