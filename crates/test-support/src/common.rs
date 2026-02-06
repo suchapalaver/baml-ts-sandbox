@@ -2,7 +2,7 @@
 
 pub use crate::support::tools::*;
 mod test_tools;
-pub use test_tools::{WeatherTool, UppercaseTool, DelayedResponseTool};
+pub use test_tools::{DelayedResponseTool, UppercaseTool, WeatherTool};
 
 // Fixture helpers
 use std::path::PathBuf;
@@ -25,13 +25,17 @@ pub fn agent_fixture(name: &str) -> PathBuf {
 
 pub fn setup_baml_runtime(schema_path: &str) -> Arc<Mutex<BamlRuntimeManager>> {
     let mut manager = BamlRuntimeManager::new().expect("Should create manager");
-    manager.load_schema(schema_path).expect("Should load schema");
+    manager
+        .load_schema(schema_path)
+        .expect("Should load schema");
     Arc::new(Mutex::new(manager))
 }
 
 pub fn setup_baml_runtime_manager(schema_path: &str) -> BamlRuntimeManager {
     let mut manager = BamlRuntimeManager::new().expect("Should create manager");
-    manager.load_schema(schema_path).expect("Should load schema");
+    manager
+        .load_schema(schema_path)
+        .expect("Should load schema");
     manager
 }
 
@@ -64,7 +68,9 @@ pub fn setup_baml_runtime_from_fixture(fixture_name: &str) -> Arc<Mutex<BamlRunt
 }
 
 pub async fn setup_bridge(baml_manager: Arc<Mutex<BamlRuntimeManager>>) -> QuickJSBridge {
-    let mut bridge = QuickJSBridge::new(baml_manager).await.expect("Create QuickJS bridge");
+    let mut bridge = QuickJSBridge::new(baml_manager)
+        .await
+        .expect("Create QuickJS bridge");
     bridge
         .register_baml_functions()
         .await
@@ -106,7 +112,10 @@ pub async fn assert_tool_registered_in_js(bridge: &mut QuickJSBridge, tool_name:
         "#,
         tool_name
     );
-    let result = bridge.evaluate(&js_code).await.expect("Should check tool registration");
+    let result = bridge
+        .evaluate(&js_code)
+        .await
+        .expect("Should check tool registration");
     let obj = result.as_object().expect("Expected object");
     let tool_exists = obj
         .get("toolExists")

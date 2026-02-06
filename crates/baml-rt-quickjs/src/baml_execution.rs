@@ -3,11 +3,11 @@
 //! This module executes BAML functions using the compiled IL (Intermediate Language)
 //! from the BAML compiler.
 
-use baml_rt_core::{BamlRtError, Result};
-use baml_rt_tools::{ToolMapper, ToolRegistry};
-use baml_rt_interceptor::{InterceptorDecision, InterceptorRegistry};
 use crate::baml_collector::BamlLLMCollector;
 use crate::baml_pre_execution::intercept_llm_call_pre_execution;
+use baml_rt_core::{BamlRtError, Result};
+use baml_rt_interceptor::{InterceptorDecision, InterceptorRegistry};
+use baml_rt_tools::{ToolMapper, ToolRegistry};
 use baml_runtime::{BamlRuntime, FunctionResultStream, RuntimeContextManager};
 use baml_types::BamlValue;
 use serde_json::Value;
@@ -107,12 +107,9 @@ impl BamlExecutor {
         let _start_time = Instant::now();
 
         // Create collector for LLM interception if registry is provided
-        let collector: Option<BamlLLMCollector> = interceptor_registry.as_ref().map(|registry| {
-            BamlLLMCollector::new(
-                registry.clone(),
-                function_name.to_string(),
-            )
-        });
+        let collector: Option<BamlLLMCollector> = interceptor_registry
+            .as_ref()
+            .map(|registry| BamlLLMCollector::new(registry.clone(), function_name.to_string()));
 
         // Pre-execution interception: intercept LLM calls before they're sent
         if let Some(ref registry) = interceptor_registry {
@@ -124,14 +121,17 @@ impl BamlExecutor {
                 registry,
                 env_vars.clone(),
                 false, // stream = false for regular calls
-            ).await {
+            )
+            .await
+            {
                 Ok(InterceptorDecision::Allow) => {
                     // Allow the call to proceed
                 }
                 Ok(InterceptorDecision::Block(msg)) => {
                     // Block the call - return error
                     return Err(BamlRtError::BamlRuntime(format!(
-                        "LLM call blocked by interceptor: {}", msg
+                        "LLM call blocked by interceptor: {}",
+                        msg
                     )));
                 }
                 Err(e) => {
@@ -150,26 +150,27 @@ impl BamlExecutor {
             None
         };
 
-        let (result, _call_id) = self.runtime.call_function(
-            function_name.to_string(),
-            &params,
-            &self.ctx_manager,
-            None, // type_builder
-            None, // client_registry
-            collectors, // collectors - now wired up to track execution
-            env_vars,
-            tags,
-            cancel_tripwire,
-        ).await;
+        let (result, _call_id) = self
+            .runtime
+            .call_function(
+                function_name.to_string(),
+                &params,
+                &self.ctx_manager,
+                None,       // type_builder
+                None,       // client_registry
+                collectors, // collectors - now wired up to track execution
+                env_vars,
+                tags,
+                cancel_tripwire,
+            )
+            .await;
 
-        let function_result = result
-            .map_err(|e| BamlRtError::ExecutionFailed { source: e })?;
+        let function_result = result.map_err(|e| BamlRtError::ExecutionFailed { source: e })?;
 
         // Extract the parsed value
-        let parsed_result = function_result
-            .parsed()
-            .as_ref()
-            .ok_or_else(|| BamlRtError::BamlRuntime("Function returned no parsed result".to_string()))?;
+        let parsed_result = function_result.parsed().as_ref().ok_or_else(|| {
+            BamlRtError::BamlRuntime("Function returned no parsed result".to_string())
+        })?;
         let parsed = parsed_result
             .as_ref()
             .map_err(|e| BamlRtError::ParsedResultFailed {
@@ -177,8 +178,8 @@ impl BamlExecutor {
             })?;
 
         // Convert ResponseBamlValue to JSON using serialize_partial
-        let json_value = serde_json::to_value(parsed.serialize_partial())
-            .map_err(BamlRtError::Json)?;
+        let json_value =
+            serde_json::to_value(parsed.serialize_partial()).map_err(BamlRtError::Json)?;
 
         // Process trace events to notify LLM interceptors of completion
         // This extracts LLM call information from BAML's trace events
@@ -231,18 +232,20 @@ impl BamlExecutor {
         let tags = None;
         let cancel_tripwire = baml_runtime::TripWire::new(None);
 
-        let stream = self.runtime.stream_function(
-            function_name.to_string(),
-            &params,
-            &self.ctx_manager,
-            None, // type_builder
-            None, // client_registry
-            None, // collectors
-            env_vars,
-            cancel_tripwire,
-            tags,
-        )
-        .map_err(|e| BamlRtError::BamlRuntime(format!("Failed to create stream: {}", e)))?;
+        let stream = self
+            .runtime
+            .stream_function(
+                function_name.to_string(),
+                &params,
+                &self.ctx_manager,
+                None, // type_builder
+                None, // client_registry
+                None, // collectors
+                env_vars,
+                cancel_tripwire,
+                tags,
+            )
+            .map_err(|e| BamlRtError::BamlRuntime(format!("Failed to create stream: {}", e)))?;
 
         Ok(stream)
     }
@@ -254,12 +257,16 @@ impl BamlExecutor {
 
     /// List all available function names from the loaded BAML runtime
     pub fn list_functions(&self) -> Vec<String> {
-        self.runtime.function_names().map(|s| s.to_string()).collect()
+        self.runtime
+            .function_names()
+            .map(|s| s.to_string())
+            .collect()
     }
 
     /// Convert JSON Value to BamlMap<String, BamlValue>
     fn json_to_baml_map(&self, value: &Value) -> Result<baml_types::BamlMap<String, BamlValue>> {
-        let obj = value.as_object()
+        let obj = value
+            .as_object()
             .ok_or_else(|| BamlRtError::InvalidArgument("Expected JSON object".to_string()))?;
 
         let mut map = baml_types::BamlMap::new();
@@ -280,7 +287,10 @@ impl BamlExecutor {
                 } else if let Some(f) = n.as_f64() {
                     Ok(BamlValue::Float(f))
                 } else {
-                    Err(BamlRtError::TypeConversion(format!("Invalid number: {}", n)))
+                    Err(BamlRtError::TypeConversion(format!(
+                        "Invalid number: {}",
+                        n
+                    )))
                 }
             }
             Value::Bool(b) => Ok(BamlValue::Bool(*b)),
@@ -301,7 +311,6 @@ impl BamlExecutor {
             Value::Null => Ok(BamlValue::Null),
         }
     }
-
 }
 
 async fn maybe_execute_tool_from_result(
@@ -326,8 +335,8 @@ async fn maybe_execute_tool_from_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use baml_rt_tools::BamlTool;
     use async_trait::async_trait;
+    use baml_rt_tools::BamlTool;
     use serde_json::json;
 
     struct EchoTool;
@@ -371,11 +380,10 @@ mod tests {
             "message": "hello"
         });
 
-        let tool_result =
-            maybe_execute_tool_from_result(&registry, &mapper, &result)
-                .await
-                .unwrap()
-                .expect("expected tool execution");
+        let tool_result = maybe_execute_tool_from_result(&registry, &mapper, &result)
+            .await
+            .unwrap()
+            .expect("expected tool execution");
 
         assert_eq!(tool_result["echo"]["message"], "hello");
     }
@@ -386,10 +394,9 @@ mod tests {
         let mapper = Arc::new(StdMutex::new(ToolMapper::new()));
 
         let result = json!({ "value": "not a tool" });
-        let tool_result =
-            maybe_execute_tool_from_result(&registry, &mapper, &result)
-                .await
-                .unwrap();
+        let tool_result = maybe_execute_tool_from_result(&registry, &mapper, &result)
+            .await
+            .unwrap();
 
         assert!(tool_result.is_none());
     }

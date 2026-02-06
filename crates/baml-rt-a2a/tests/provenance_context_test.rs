@@ -1,17 +1,19 @@
-use baml_rt_a2a::a2a_types::{JSONRPCId, JSONRPCRequest, Message, MessageRole, Part, SendMessageRequest, ROLE_USER};
-use baml_rt_a2a::{A2aAgent, A2aRequestHandler};
-use baml_rt::{BamlRuntimeManager, Result};
+use async_trait::async_trait;
 use baml_rt::tools::BamlTool;
+use baml_rt::{BamlRuntimeManager, Result};
+use baml_rt_a2a::a2a_store::ProvenanceTaskStore;
+use baml_rt_a2a::a2a_types::{
+    JSONRPCId, JSONRPCRequest, Message, MessageRole, Part, ROLE_USER, SendMessageRequest,
+};
+use baml_rt_a2a::{A2aAgent, A2aRequestHandler};
 use baml_rt_core::ids::{ContextId, MessageId};
 use baml_rt_provenance::InMemoryProvenanceStore;
 use baml_rt_provenance::{ProvEventData, ProvEventType};
-use baml_rt_a2a::a2a_store::ProvenanceTaskStore;
 use serde_json::Value;
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
 use test_support::support::a2a::A2aInMemoryClient;
-use async_trait::async_trait;
-use serde_json::json;
 
 fn user_message(message_id: &str, text: &str, context_id: Option<ContextId>) -> Message {
     Message {
@@ -91,7 +93,11 @@ async fn test_context_id_propagates_across_agents() {
 
     let client = A2aInMemoryClient::new(Arc::new(agent2));
     let params = SendMessageRequest {
-        message: user_message("msg-2", "forward", Some(ContextId::from(context_id.clone()))),
+        message: user_message(
+            "msg-2",
+            "forward",
+            Some(ContextId::from(context_id.clone())),
+        ),
         configuration: None,
         metadata: None,
         tenant: None,
@@ -109,7 +115,9 @@ async fn test_context_id_propagates_across_agents() {
     let events = writer2.events().await;
     let context_id_typed = ContextId::from(context_id);
     assert!(
-        events.iter().any(|event| event.context_id == context_id_typed),
+        events
+            .iter()
+            .any(|event| event.context_id == context_id_typed),
         "expected provenance events to include propagated context_id"
     );
 }
@@ -198,7 +206,10 @@ async fn test_context_id_is_task_local_under_concurrency() {
             successes, 2,
             "expected 2 tool successes for {context_id}, got {successes}"
         );
-        assert_eq!(starts, completes, "pre/post pairing mismatch for {context_id}");
+        assert_eq!(
+            starts, completes,
+            "pre/post pairing mismatch for {context_id}"
+        );
     }
 }
 
@@ -242,18 +253,20 @@ fn tool_event_counts(
             continue;
         }
         match &event.data {
-            ProvEventData::ToolCall { tool_name: name, success, .. } if name == tool_name => {
-                match (event.event_type.clone(), success) {
-                    (ProvEventType::ToolCallStarted, None) => starts += 1,
-                    (ProvEventType::ToolCallCompleted, Some(result)) => {
-                        completes += 1;
-                        if *result {
-                            successes += 1;
-                        }
+            ProvEventData::ToolCall {
+                tool_name: name,
+                success,
+                ..
+            } if name == tool_name => match (event.event_type.clone(), success) {
+                (ProvEventType::ToolCallStarted, None) => starts += 1,
+                (ProvEventType::ToolCallCompleted, Some(result)) => {
+                    completes += 1;
+                    if *result {
+                        successes += 1;
                     }
-                    _ => {}
                 }
-            }
+                _ => {}
+            },
             _ => {}
         }
     }

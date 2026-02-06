@@ -3,8 +3,8 @@
 //! This module implements pre-execution interception by using BAML's build_request
 //! to intercept LLM calls before the HTTP request is sent.
 
-use baml_rt_core::{BamlRtError, Result};
 use baml_rt_core::context;
+use baml_rt_core::{BamlRtError, Result};
 use baml_rt_interceptor::{InterceptorDecision, InterceptorRegistry, LLMCallContext};
 use baml_runtime::RuntimeContextManager;
 use baml_types::{BamlMap, BamlValue};
@@ -26,10 +26,7 @@ pub fn extract_context_from_http_request(
     // ClientDetails has fields: name, provider, options
     let (client, model) = {
         let client_details = &http_request.client_details;
-        (
-            client_details.name.clone(),
-            client_details.provider.clone(),
-        )
+        (client_details.name.clone(), client_details.provider.clone())
     };
 
     // Extract prompt/messages from the request body
@@ -75,18 +72,20 @@ pub async fn intercept_llm_call_pre_execution(
 ) -> Result<InterceptorDecision> {
     // Build the HTTP request to get LLM call details
     // This doesn't actually send the request, just builds it
-    let http_request_result = runtime.build_request(
-        function_name.to_string(),
-        params,
-        ctx_manager,
-        None, // type_builder
-        None, // client_registry
-        env_vars,
-        stream,
-    ).await;
+    let http_request_result = runtime
+        .build_request(
+            function_name.to_string(),
+            params,
+            ctx_manager,
+            None, // type_builder
+            None, // client_registry
+            env_vars,
+            stream,
+        )
+        .await;
 
-    let http_request = http_request_result
-        .map_err(|e| BamlRtError::RequestBuildFailed(e.to_string()))?;
+    let http_request =
+        http_request_result.map_err(|e| BamlRtError::RequestBuildFailed(e.to_string()))?;
 
     // Extract LLM call context from the HTTP request
     let context = extract_context_from_http_request(&http_request, function_name);

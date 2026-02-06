@@ -3,8 +3,8 @@
 //! When BAML returns a union type representing a tool choice, this module
 //! maps it to the corresponding Rust tool function and executes it.
 
-use baml_rt_core::{BamlRtError, Result};
 use crate::tools::ToolRegistry;
+use baml_rt_core::{BamlRtError, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -57,10 +57,14 @@ impl ToolMapper {
 
     /// Get tool name for a variant (public for use in execute_tool_from_baml_result)
     pub fn variant_to_tool_name(&self, variant_name: &str) -> Result<String> {
-        self.variant_to_tool.get(variant_name)
-            .ok_or_else(|| BamlRtError::FunctionNotFound(
-                format!("No tool mapping found for BAML variant '{}'", variant_name)
-            ))
+        self.variant_to_tool
+            .get(variant_name)
+            .ok_or_else(|| {
+                BamlRtError::FunctionNotFound(format!(
+                    "No tool mapping found for BAML variant '{}'",
+                    variant_name
+                ))
+            })
             .cloned()
     }
 
@@ -72,10 +76,11 @@ impl ToolMapper {
         let (variant_name, tool_obj_value) = if let Some(obj) = baml_result.as_object() {
             // Check if it's a single-key object where the key is a variant name
             if obj.len() == 1 {
-                let (key, value) = obj.iter().next()
-                    .ok_or_else(|| BamlRtError::InvalidArgument(
-                        "Expected non-empty object with tool variant".to_string()
-                    ))?;
+                let (key, value) = obj.iter().next().ok_or_else(|| {
+                    BamlRtError::InvalidArgument(
+                        "Expected non-empty object with tool variant".to_string(),
+                    )
+                })?;
                 // Check if this key matches a known variant
                 if self.variant_to_tool.contains_key(key) {
                     (key.clone(), value.clone())
@@ -89,14 +94,15 @@ impl ToolMapper {
             }
         } else {
             return Err(BamlRtError::InvalidArgument(
-                "Expected BAML result to be an object representing a tool choice".to_string()
+                "Expected BAML result to be an object representing a tool choice".to_string(),
             ));
         };
 
-        let tool_obj = tool_obj_value.as_object()
-            .ok_or_else(|| BamlRtError::InvalidArgument(
-                "Expected BAML result to be an object representing a tool choice".to_string()
-            ))?;
+        let tool_obj = tool_obj_value.as_object().ok_or_else(|| {
+            BamlRtError::InvalidArgument(
+                "Expected BAML result to be an object representing a tool choice".to_string(),
+            )
+        })?;
 
         // Determine variant name
         let variant_name = if !variant_name.is_empty() {
@@ -143,7 +149,10 @@ impl ToolMapper {
     /// This only triggers when the result explicitly identifies a mapped tool:
     /// - Nested object form: { "WeatherTool": { ... } }
     /// - Explicit __type field: { "__type": "WeatherTool", ... }
-    pub fn extract_explicit_tool_call(&self, baml_result: &Value) -> Result<Option<(String, Value)>> {
+    pub fn extract_explicit_tool_call(
+        &self,
+        baml_result: &Value,
+    ) -> Result<Option<(String, Value)>> {
         let obj = match baml_result.as_object() {
             Some(obj) => obj,
             None => return Ok(None),
@@ -155,7 +164,9 @@ impl ToolMapper {
             })?;
             if self.variant_to_tool.contains_key(key) {
                 let tool_obj = value.as_object().ok_or_else(|| {
-                    BamlRtError::InvalidArgument("Expected tool payload to be an object".to_string())
+                    BamlRtError::InvalidArgument(
+                        "Expected tool payload to be an object".to_string(),
+                    )
                 })?;
                 let tool_name = self.variant_to_tool_name(key)?;
                 let tool_args = tool_obj
@@ -209,10 +220,11 @@ impl ToolMapper {
         let (variant_name, tool_obj_value) = if let Some(obj) = baml_result.as_object() {
             // Check if it's a single-key object where the key is a variant name
             if obj.len() == 1 {
-                let (key, value) = obj.iter().next()
-                    .ok_or_else(|| BamlRtError::InvalidArgument(
-                        "Expected non-empty object with tool variant".to_string()
-                    ))?;
+                let (key, value) = obj.iter().next().ok_or_else(|| {
+                    BamlRtError::InvalidArgument(
+                        "Expected non-empty object with tool variant".to_string(),
+                    )
+                })?;
                 // Check if this key matches a known variant
                 if self.variant_to_tool.contains_key(key) {
                     (key.clone(), value.clone())
@@ -226,14 +238,15 @@ impl ToolMapper {
             }
         } else {
             return Err(BamlRtError::InvalidArgument(
-                "Expected BAML result to be an object representing a tool choice".to_string()
+                "Expected BAML result to be an object representing a tool choice".to_string(),
             ));
         };
 
-        let tool_obj = tool_obj_value.as_object()
-            .ok_or_else(|| BamlRtError::InvalidArgument(
-                "Expected BAML result to be an object representing a tool choice".to_string()
-            ))?;
+        let tool_obj = tool_obj_value.as_object().ok_or_else(|| {
+            BamlRtError::InvalidArgument(
+                "Expected BAML result to be an object representing a tool choice".to_string(),
+            )
+        })?;
 
         // Determine variant name
         let variant_name = if !variant_name.is_empty() {
@@ -267,12 +280,13 @@ impl ToolMapper {
         );
 
         // Map variant name to tool function name
-        let tool_function_name = self.variant_to_tool.get(&variant_name)
-            .ok_or_else(|| BamlRtError::FunctionNotFound(
-                format!("No tool mapping found for BAML variant '{}'. Registered mappings: {:?}",
-                    variant_name,
-                    self.variant_to_tool.keys().collect::<Vec<_>>())
-            ))?;
+        let tool_function_name = self.variant_to_tool.get(&variant_name).ok_or_else(|| {
+            BamlRtError::FunctionNotFound(format!(
+                "No tool mapping found for BAML variant '{}'. Registered mappings: {:?}",
+                variant_name,
+                self.variant_to_tool.keys().collect::<Vec<_>>()
+            ))
+        })?;
 
         tracing::info!(
             variant = variant_name.as_str(),
@@ -301,7 +315,9 @@ impl ToolMapper {
 
         // Execute the tool
         let registry = tool_registry.lock().await;
-        let tool_result = registry.execute(tool_function_name, Value::Object(tool_args)).await?;
+        let tool_result = registry
+            .execute(tool_function_name, Value::Object(tool_args))
+            .await?;
 
         tracing::debug!(
             variant = variant_name.as_str(),
@@ -323,4 +339,3 @@ impl Default for ToolMapper {
         Self::new()
     }
 }
-

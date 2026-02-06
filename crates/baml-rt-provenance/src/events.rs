@@ -192,14 +192,21 @@ impl ProvEvent {
         }
     }
 
-    pub fn task_created(context_id: ContextId, task_id: TaskId, agent_type: Option<String>) -> Self {
+    pub fn task_created(
+        context_id: ContextId,
+        task_id: TaskId,
+        agent_type: Option<String>,
+    ) -> Self {
         Self {
             id: next_event_id(),
             event_type: ProvEventType::TaskCreated,
             context_id,
             task_id: Some(task_id.clone()),
             timestamp_ms: now_millis(),
-            data: ProvEventData::TaskCreated { task_id, agent_type },
+            data: ProvEventData::TaskCreated {
+                task_id,
+                agent_type,
+            },
         }
     }
 
@@ -215,7 +222,11 @@ impl ProvEvent {
             context_id,
             task_id: Some(task_id.clone()),
             timestamp_ms: now_millis(),
-            data: ProvEventData::TaskStatusChanged { task_id, old_status, new_status },
+            data: ProvEventData::TaskStatusChanged {
+                task_id,
+                old_status,
+                new_status,
+            },
         }
     }
 
@@ -231,7 +242,11 @@ impl ProvEvent {
             context_id,
             task_id: Some(task_id.clone()),
             timestamp_ms: now_millis(),
-            data: ProvEventData::TaskArtifactGenerated { task_id, artifact_id, artifact_type },
+            data: ProvEventData::TaskArtifactGenerated {
+                task_id,
+                artifact_id,
+                artifact_type,
+            },
         }
     }
 }

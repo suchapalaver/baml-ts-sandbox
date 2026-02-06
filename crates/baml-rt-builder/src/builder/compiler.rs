@@ -1,8 +1,8 @@
 //! Compiler implementations for BAML and TypeScript
 
-use baml_rt_core::{BamlRtError, Result};
-use crate::builder::traits::{TypeScriptCompiler, TypeGenerator, FileSystem};
+use crate::builder::traits::{FileSystem, TypeGenerator, TypeScriptCompiler};
 use crate::builder::types::BuildDir;
+use baml_rt_core::{BamlRtError, Result};
 use std::fs;
 use std::path::Path;
 
@@ -33,7 +33,7 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
 
         for file_path in files {
             let content = self.filesystem.read_to_string(&file_path)?;
-            
+
             let allocator = Allocator::default();
             let source_type = oxc_span::SourceType::from_path(&file_path)
                 .unwrap_or_else(|_| oxc_span::SourceType::default());
@@ -41,7 +41,8 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
             let parse_result = parser.parse();
 
             if !parse_result.errors.is_empty() {
-                let errors: Vec<String> = parse_result.errors
+                let errors: Vec<String> = parse_result
+                    .errors
                     .iter()
                     .map(|e| format!("{:?}", e))
                     .collect();
@@ -57,7 +58,8 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
                 .with_excess_capacity(2.0)
                 .build(&program);
             if !semantic_result.errors.is_empty() {
-                let errors: Vec<String> = semantic_result.errors
+                let errors: Vec<String> = semantic_result
+                    .errors
                     .iter()
                     .map(|e| format!("{:?}", e))
                     .collect();
@@ -74,7 +76,8 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
             let transform_result = Transformer::new(&allocator, &file_path, &transform_options)
                 .build_with_scoping(scoping, &mut program);
             if !transform_result.errors.is_empty() {
-                let errors: Vec<String> = transform_result.errors
+                let errors: Vec<String> = transform_result
+                    .errors
                     .iter()
                     .map(|e| format!("{:?}", e))
                     .collect();
@@ -86,11 +89,13 @@ impl<FS: FileSystem> TypeScriptCompiler for OxcTypeScriptCompiler<FS> {
             }
 
             let js_code = Codegen::new().build(&program).code;
-            let relative_path = file_path.strip_prefix(src_dir)
-                .map_err(|_| BamlRtError::InvalidArgument(
-                    format!("File {} is not under src directory", file_path.display())
-                ))?;
-            
+            let relative_path = file_path.strip_prefix(src_dir).map_err(|_| {
+                BamlRtError::InvalidArgument(format!(
+                    "File {} is not under src directory",
+                    file_path.display()
+                ))
+            })?;
+
             let output_path = dist_dir.join(relative_path).with_extension("js");
             if let Some(parent) = output_path.parent() {
                 self.filesystem.create_dir_all(parent)?;
@@ -123,19 +128,20 @@ impl TypeGenerator for RuntimeTypeGenerator {
     async fn generate(&self, baml_src: &Path, build_dir: &BuildDir) -> Result<()> {
         use baml_runtime::BamlRuntime;
         use std::collections::HashMap;
-        
+
         // Load BAML runtime to discover functions
         let env_vars: HashMap<String, String> = HashMap::new();
         let feature_flags = internal_baml_core::feature_flags::FeatureFlags::default();
-        
+
         let runtime = BamlRuntime::from_directory(baml_src, env_vars, feature_flags)
             .map_err(|e| BamlRtError::RuntimeLoadFailed { source: e })?;
-        
+
         // Get function names from runtime
         let function_names: Vec<String> = runtime.function_names().map(|s| s.to_string()).collect();
 
         // Generate type declarations
-        let mut declarations = String::from("// TypeScript declarations for BAML runtime host functions\n");
+        let mut declarations =
+            String::from("// TypeScript declarations for BAML runtime host functions\n");
         declarations.push_str("// This file is auto-generated - do not edit manually\n");
         declarations.push_str("// Generated from BAML runtime\n\n");
 
@@ -147,11 +153,12 @@ impl TypeGenerator for RuntimeTypeGenerator {
                 function_name, function_name
             ));
         }
-        
+
         // Add invokeTool declaration
         declarations.push_str("/**\n");
         declarations.push_str(" * Dynamically invoke a tool by name.\n");
-        declarations.push_str(" * Works for both Rust-registered tools and JavaScript-registered tools.\n");
+        declarations
+            .push_str(" * Works for both Rust-registered tools and JavaScript-registered tools.\n");
         declarations.push_str(" */\ndeclare function invokeTool(toolName: string, args: Record<string, any>): Promise<any>;\n\n");
 
         let output_path = build_dir.join("dist").join("baml-runtime.d.ts");

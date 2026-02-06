@@ -11,7 +11,9 @@ pub mod runtime;
 pub mod traits;
 
 pub use baml::BamlRuntimeManager;
+pub use context::{BamlContext, ContextMetadata};
 pub use quickjs_bridge::QuickJSBridge;
 pub use runtime::{QuickJSConfig, Runtime, RuntimeBuilder, RuntimeConfig};
-pub use context::{BamlContext, ContextMetadata};
-pub use traits::{BamlFunctionExecutor, BamlGateway, JsRuntimeHost, SchemaLoader, ToolRegistryTrait};
+pub use traits::{
+    BamlFunctionExecutor, BamlGateway, JsRuntimeHost, SchemaLoader, ToolRegistryTrait,
+};

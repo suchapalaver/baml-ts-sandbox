@@ -3,11 +3,11 @@
 //! This module provides a trait-based system for registering tool functions
 //! that can be called by LLMs during BAML function execution or directly from JavaScript.
 
+use async_trait::async_trait;
 use baml_rt_core::{BamlRtError, Result};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use async_trait::async_trait;
 
 /// Trait for BAML tools that can be called by LLMs or JavaScript
 ///
@@ -210,7 +210,9 @@ impl ToolRegistry {
 
     /// Execute a tool function by name
     pub async fn execute(&self, name: &str, args: Value) -> Result<Value> {
-        let (_, tool_executor) = self.tools.get(name)
+        let (_, tool_executor) = self
+            .tools
+            .get(name)
             .ok_or_else(|| BamlRtError::FunctionNotFound(format!("Tool '{}' not found", name)))?;
 
         tracing::debug!(

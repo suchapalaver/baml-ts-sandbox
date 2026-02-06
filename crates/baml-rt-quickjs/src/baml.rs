@@ -1,16 +1,16 @@
 //! BAML runtime wrapper and function execution
 
 use crate::baml_execution::BamlExecutor;
-use baml_rt_core::{BamlRtError, Result};
-use baml_rt_core::types::FunctionSignature;
-use baml_rt_tools::{ToolRegistry as ConcreteToolRegistry, ToolMetadata, ToolMapper};
 use crate::traits::{BamlFunctionExecutor, SchemaLoader};
-use baml_rt_interceptor::InterceptorRegistry;
-use baml_rt_core::correlation::current_correlation_id;
-use baml_rt_core::context;
-use baml_rt_observability::metrics;
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use baml_rt_core::context;
+use baml_rt_core::correlation::current_correlation_id;
+use baml_rt_core::types::FunctionSignature;
+use baml_rt_core::{BamlRtError, Result};
+use baml_rt_interceptor::InterceptorRegistry;
+use baml_rt_observability::metrics;
+use baml_rt_tools::{ToolMapper, ToolMetadata, ToolRegistry as ConcreteToolRegistry};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::Mutex as TokioMutex;
@@ -61,8 +61,7 @@ impl BamlRuntimeManager {
         // Find project root
         let schema_path_obj = Path::new(schema_path);
         let project_root = if schema_path_obj.is_file() {
-            schema_path_obj.parent()
-                .and_then(|p| p.parent())
+            schema_path_obj.parent().and_then(|p| p.parent())
         } else if schema_path_obj.file_name() == Some(std::ffi::OsStr::new("baml_src")) {
             schema_path_obj.parent()
         } else {
@@ -73,14 +72,15 @@ impl BamlRuntimeManager {
         let baml_src_dir = project_root.join("baml_src");
         if !baml_src_dir.exists() {
             return Err(BamlRtError::BamlRuntime(
-                "baml_src directory not found".to_string()
+                "baml_src directory not found".to_string(),
             ));
         }
 
         // Load BAML IL into executor (pass tool registry)
         let tool_registry_clone = self.tool_registry.clone();
         let tool_mapper_clone = self.tool_mapper.clone();
-        let executor = BamlExecutor::load_il(&baml_src_dir, tool_registry_clone, tool_mapper_clone)?;
+        let executor =
+            BamlExecutor::load_il(&baml_src_dir, tool_registry_clone, tool_mapper_clone)?;
 
         // Discover functions from the BAML runtime
         let function_names = executor.list_functions();
@@ -143,12 +143,16 @@ impl BamlRuntimeManager {
             .ok_or_else(|| BamlRtError::FunctionNotFound(function_name.to_string()))?;
 
         // Execute the BAML function using the executor
-        let executor = self.executor.as_ref()
+        let executor = self
+            .executor
+            .as_ref()
             .ok_or_else(|| BamlRtError::BamlRuntime("BAML runtime not loaded".to_string()))?;
 
         // Pass tool registry and interceptor registry to executor
         let interceptor_registry = Some(self.interceptor_registry.clone());
-        executor.execute_function(function_name, args, interceptor_registry).await
+        executor
+            .execute_function(function_name, args, interceptor_registry)
+            .await
     }
 
     /// Invoke a BAML function with streaming support
@@ -172,7 +176,9 @@ impl BamlRuntimeManager {
             .ok_or_else(|| BamlRtError::FunctionNotFound(function_name.to_string()))?;
 
         // Execute the BAML function using the executor
-        let executor = self.executor.as_ref()
+        let executor = self
+            .executor
+            .as_ref()
             .ok_or_else(|| BamlRtError::BamlRuntime("BAML runtime not loaded".to_string()))?;
 
         executor.execute_function_stream(function_name, args)
@@ -194,13 +200,19 @@ impl BamlRuntimeManager {
     }
 
     /// Register an LLM interceptor
-    pub async fn register_llm_interceptor<I: baml_rt_interceptor::LLMInterceptor>(&self, interceptor: I) {
+    pub async fn register_llm_interceptor<I: baml_rt_interceptor::LLMInterceptor>(
+        &self,
+        interceptor: I,
+    ) {
         let mut registry = self.interceptor_registry.lock().await;
         registry.register_llm_interceptor(interceptor);
     }
 
     /// Register a tool interceptor
-    pub async fn register_tool_interceptor<I: baml_rt_interceptor::ToolInterceptor>(&self, interceptor: I) {
+    pub async fn register_tool_interceptor<I: baml_rt_interceptor::ToolInterceptor>(
+        &self,
+        interceptor: I,
+    ) {
         let mut registry = self.interceptor_registry.lock().await;
         registry.register_tool_interceptor(interceptor);
     }
@@ -284,7 +296,9 @@ impl BamlRuntimeManager {
 
         // Notify interceptors of completion
         let interceptor_registry = self.interceptor_registry.lock().await;
-        interceptor_registry.notify_tool_call_complete(&context, &result, duration_ms).await;
+        interceptor_registry
+            .notify_tool_call_complete(&context, &result, duration_ms)
+            .await;
         drop(interceptor_registry);
 
         let metric_result = if result.is_ok() { "success" } else { "error" };

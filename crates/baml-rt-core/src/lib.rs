@@ -1,7 +1,7 @@
 //! BAML runtime core types and shared utilities.
 
-pub mod correlation;
 pub mod context;
+pub mod correlation;
 pub mod error;
 pub mod ids;
 pub mod types;

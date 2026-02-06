@@ -1,12 +1,14 @@
-use test_support::common;
 use async_trait::async_trait;
-use baml_rt::a2a_types::{JSONRPCId, JSONRPCRequest, Message, MessageRole, Part, SendMessageRequest};
-use baml_rt::tools::BamlTool;
+use baml_rt::a2a_types::{
+    JSONRPCId, JSONRPCRequest, Message, MessageRole, Part, SendMessageRequest,
+};
 use baml_rt::baml::BamlRuntimeManager;
+use baml_rt::tools::BamlTool;
 use baml_rt::{A2aAgent, A2aRequestHandler};
-use serde_json::{json, Value};
-use std::fs;
+use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::fs;
+use test_support::common;
 use test_support::common::CalculatorTool;
 
 fn fixture_agent_dir() -> std::path::PathBuf {
@@ -192,7 +194,10 @@ async fn test_tasks_subscribe_streams_incremental_updates() {
     }
 
     assert!(saw_status, "expected status updates in subscribe stream");
-    assert!(saw_artifact, "expected artifact updates in subscribe stream");
+    assert!(
+        saw_artifact,
+        "expected artifact updates in subscribe stream"
+    );
 }
 
 struct AddNumbersTool;
@@ -218,8 +223,14 @@ impl BamlTool for AddNumbersTool {
 
     async fn execute(&self, args: serde_json::Value) -> baml_rt::Result<serde_json::Value> {
         let obj = args.as_object().expect("Expected object");
-        let a = obj.get("a").and_then(|v| v.as_f64()).expect("Expected 'a' number");
-        let b = obj.get("b").and_then(|v| v.as_f64()).expect("Expected 'b' number");
+        let a = obj
+            .get("a")
+            .and_then(|v| v.as_f64())
+            .expect("Expected 'a' number");
+        let b = obj
+            .get("b")
+            .and_then(|v| v.as_f64())
+            .expect("Expected 'b' number");
         Ok(json!({ "result": a + b }))
     }
 }

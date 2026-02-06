@@ -1,10 +1,10 @@
 use crate::events::ProvEvent;
 use crate::store::ProvenanceWriter;
 use async_trait::async_trait;
+use baml_rt_core::Result;
 use baml_rt_interceptor::{
     InterceptorDecision, LLMCallContext, LLMInterceptor, ToolCallContext, ToolInterceptor,
 };
-use baml_rt_core::Result;
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -30,7 +30,9 @@ impl LLMInterceptor for ProvenanceInterceptor {
             context.prompt.clone(),
             context.metadata.clone(),
         );
-        self.writer.add_event_with_logging(event, "LLM call start").await;
+        self.writer
+            .add_event_with_logging(event, "LLM call start")
+            .await;
         Ok(InterceptorDecision::Allow)
     }
 
@@ -52,7 +54,9 @@ impl LLMInterceptor for ProvenanceInterceptor {
             duration_ms,
             success,
         );
-        self.writer.add_event_with_logging(event, "LLM call completion").await;
+        self.writer
+            .add_event_with_logging(event, "LLM call completion")
+            .await;
     }
 }
 
@@ -67,7 +71,9 @@ impl ToolInterceptor for ProvenanceInterceptor {
             context.args.clone(),
             context.metadata.clone(),
         );
-        self.writer.add_event_with_logging(event, "tool call start").await;
+        self.writer
+            .add_event_with_logging(event, "tool call start")
+            .await;
         Ok(InterceptorDecision::Allow)
     }
 
@@ -88,6 +94,8 @@ impl ToolInterceptor for ProvenanceInterceptor {
             duration_ms,
             success,
         );
-        self.writer.add_event_with_logging(event, "tool call completion").await;
+        self.writer
+            .add_event_with_logging(event, "tool call completion")
+            .await;
     }
 }

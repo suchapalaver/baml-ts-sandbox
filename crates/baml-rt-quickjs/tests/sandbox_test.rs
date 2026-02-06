@@ -25,10 +25,13 @@ async fn test_sandbox_prevents_require() {
 
     let result = bridge.evaluate(code).await;
     assert!(result.is_ok(), "Code should execute");
-    
+
     let value = result.unwrap();
     let msg = value.get("message").or(value.get("error"));
-    assert!(msg.is_some(), "Should return a message about require availability");
+    assert!(
+        msg.is_some(),
+        "Should return a message about require availability"
+    );
 }
 
 #[tokio::test]
@@ -52,10 +55,15 @@ async fn test_sandbox_console_log_works() {
 
     let result = bridge.evaluate(code).await;
     assert!(result.is_ok(), "Code should execute");
-    
+
     let value = result.unwrap();
-    assert!(value.get("success").and_then(|v| v.as_bool()).unwrap_or(false), 
-            "console.log should work");
+    assert!(
+        value
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        "console.log should work"
+    );
 }
 
 #[tokio::test]
@@ -80,8 +88,11 @@ async fn test_sandbox_prevents_fetch() {
 
     let result = bridge.evaluate(code).await;
     assert!(result.is_ok(), "Code should execute");
-    
+
     let value = result.unwrap();
     let msg = value.get("message").or(value.get("error"));
-    assert!(msg.is_some(), "Should return a message about fetch availability");
+    assert!(
+        msg.is_some(),
+        "Should return a message about fetch availability"
+    );
 }

@@ -1,14 +1,14 @@
 use crate::a2a_types::{
-    Artifact, ListTasksRequest, ListTasksResponse, Message, Task, TaskArtifactUpdateEvent,
-    TaskState, TaskStatus, TaskStatusUpdateEvent, TASK_STATE_CANCELED,
+    Artifact, ListTasksRequest, ListTasksResponse, Message, TASK_STATE_CANCELED, Task,
+    TaskArtifactUpdateEvent, TaskState, TaskStatus, TaskStatusUpdateEvent,
 };
 use async_trait::async_trait;
 use baml_rt_core::context;
 use baml_rt_core::ids::{ContextId, TaskId};
 use baml_rt_provenance::{ProvEvent, ProvenanceWriter};
-use tokio::sync::Mutex;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Debug, Clone)]
 pub enum TaskUpdateEvent {
@@ -120,7 +120,6 @@ impl TaskEventRecorder for Mutex<TaskStore> {
         let mut store = self.lock().await;
         store.record_artifact_update(task_id, context_id, artifact, append, last_chunk)
     }
-
 }
 
 #[async_trait]
@@ -146,7 +145,9 @@ impl ProvenanceTaskStore {
 
     async fn record_event(&self, event: ProvEvent) {
         if let Some(writer) = &self.writer {
-            writer.add_event_with_logging(event, "task store operation").await;
+            writer
+                .add_event_with_logging(event, "task store operation")
+                .await;
         }
     }
 }
@@ -228,7 +229,6 @@ impl TaskEventRecorder for ProvenanceTaskStore {
         let mut store = self.inner.lock().await;
         store.record_artifact_update(task_id, context_id, artifact, append, last_chunk)
     }
-
 }
 
 #[async_trait]
@@ -240,13 +240,10 @@ impl TaskUpdateQueue for ProvenanceTaskStore {
 }
 
 fn status_to_string(status: &TaskStatus) -> Option<String> {
-    status
-        .state
-        .as_ref()
-        .map(|state| match state {
-            TaskState::String(value) => value.clone(),
-            TaskState::Integer(value) => value.to_string(),
-        })
+    status.state.as_ref().map(|state| match state {
+        TaskState::String(value) => value.clone(),
+        TaskState::Integer(value) => value.to_string(),
+    })
 }
 
 impl TaskStore {
@@ -280,7 +277,9 @@ impl TaskStore {
             .collect();
 
         if let Some(context_id) = &request.context_id {
-            tasks.retain(|task| task.context_id.as_ref().map(|id| id.as_str()) == Some(context_id.as_str()));
+            tasks.retain(|task| {
+                task.context_id.as_ref().map(|id| id.as_str()) == Some(context_id.as_str())
+            });
         }
 
         if let Some(status) = &request.status {
@@ -294,7 +293,11 @@ impl TaskStore {
             }
         }
 
-        if let Some(limit) = request.history_length.as_ref().and_then(|value| value.as_usize()) {
+        if let Some(limit) = request
+            .history_length
+            .as_ref()
+            .and_then(|value| value.as_usize())
+        {
             for task in &mut tasks {
                 truncate_history(task, limit);
             }

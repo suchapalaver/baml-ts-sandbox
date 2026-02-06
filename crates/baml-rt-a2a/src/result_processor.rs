@@ -14,7 +14,10 @@ pub struct TaskProcessor {
 
 impl TaskProcessor {
     pub fn new(task_store: Arc<dyn TaskStoreBackend>, emitter: Arc<dyn EventEmitter>) -> Self {
-        Self { task_store, emitter }
+        Self {
+            task_store,
+            emitter,
+        }
     }
 
     pub async fn process_stream_response(&self, stream: StreamResponse) -> Result<()> {
@@ -28,7 +31,8 @@ impl TaskProcessor {
     }
 
     pub async fn process_send_message_response(&self, response: SendMessageResponse) -> Result<()> {
-        self.process(response.task, response.message, None, None).await
+        self.process(response.task, response.message, None, None)
+            .await
     }
 
     pub async fn process_task(&self, task: Task) -> Result<()> {

@@ -1,19 +1,21 @@
 //! Tests for agent runner binary
 
-use baml_rt::baml::BamlRuntimeManager;
+use async_trait::async_trait;
 use baml_rt::A2aRequestHandler;
-use std::path::Path;
-use std::process::Command;
-use std::fs;
+use baml_rt::a2a_types::{
+    JSONRPCId, JSONRPCRequest, Message, MessageRole, Part, SendMessageRequest,
+};
+use baml_rt::baml::BamlRuntimeManager;
+use baml_rt::tools::BamlTool;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use tar::Builder;
-use async_trait::async_trait;
 use serde_json::json;
-use baml_rt::tools::BamlTool;
-use baml_rt::a2a_types::{JSONRPCId, JSONRPCRequest, Message, MessageRole, Part, SendMessageRequest};
+use std::fs;
+use std::path::Path;
+use std::process::Command;
+use tar::Builder;
 
-use test_support::common::{ensure_baml_src_exists, agent_fixture, workspace_root, CalculatorTool};
+use test_support::common::{CalculatorTool, agent_fixture, ensure_baml_src_exists, workspace_root};
 /// Create a test agent package from a fixture agent
 fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // Use the voidship-rites fixture
@@ -27,11 +29,8 @@ fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::erro
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let temp_dir = std::env::temp_dir().join(format!(
-        "e2e-agent-{}-{}",
-        std::process::id(),
-        unique
-    ));
+    let temp_dir =
+        std::env::temp_dir().join(format!("e2e-agent-{}-{}", std::process::id(), unique));
     fs::create_dir_all(&temp_dir)?;
 
     // Copy baml_src from fixture (we no longer need baml_client - runtime loads directly from baml_src)
@@ -51,7 +50,10 @@ fn create_test_agent_package(output_path: &Path) -> Result<(), Box<dyn std::erro
         "entry_point": "dist/index.js",
         "runtime_version": "0.1.0"
     });
-    fs::write(temp_dir.join("manifest.json"), serde_json::to_string_pretty(&manifest)?)?;
+    fs::write(
+        temp_dir.join("manifest.json"),
+        serde_json::to_string_pretty(&manifest)?,
+    )?;
 
     // Create tar.gz
     if let Some(parent) = output_path.parent() {
@@ -108,8 +110,14 @@ impl BamlTool for AddNumbersTool {
 
     async fn execute(&self, args: serde_json::Value) -> baml_rt::Result<serde_json::Value> {
         let obj = args.as_object().expect("Expected object");
-        let a = obj.get("a").and_then(|v| v.as_f64()).expect("Expected 'a' number");
-        let b = obj.get("b").and_then(|v| v.as_f64()).expect("Expected 'b' number");
+        let a = obj
+            .get("a")
+            .and_then(|v| v.as_f64())
+            .expect("Expected 'a' number");
+        let b = obj
+            .get("b")
+            .and_then(|v| v.as_f64())
+            .expect("Expected 'b' number");
         Ok(json!({ "result": a + b }))
     }
 }
@@ -163,7 +171,7 @@ async fn test_agent_package_loading() {
 
     // Create a test agent package
     let package_path = std::env::temp_dir().join("test-agent-package.tar.gz");
-    
+
     match create_test_agent_package(&package_path) {
         Ok(_) => {
             println!("Created test agent package: {}", package_path.display());
@@ -182,17 +190,18 @@ async fn test_agent_package_loading() {
     let tar_gz = fs::File::open(&package_path).unwrap();
     let tar = flate2::read::GzDecoder::new(tar_gz);
     let mut archive = tar::Archive::new(tar);
-    
-    let extract_dir = std::env::temp_dir().join(format!(
-        "test-agent-extract-{}",
-        std::process::id()
-    ));
+
+    let extract_dir =
+        std::env::temp_dir().join(format!("test-agent-extract-{}", std::process::id()));
     fs::create_dir_all(&extract_dir).unwrap();
     archive.unpack(&extract_dir).unwrap();
 
     // Verify manifest exists
     let manifest_path = extract_dir.join("manifest.json");
-    assert!(manifest_path.exists(), "manifest.json should exist in package");
+    assert!(
+        manifest_path.exists(),
+        "manifest.json should exist in package"
+    );
 
     // Verify baml_src exists
     let baml_src = extract_dir.join("baml_src");
@@ -207,7 +216,7 @@ async fn test_agent_package_loading() {
 async fn test_runtime_manager_loads_schema() {
     // Test that BamlRuntimeManager can load a schema
     // This is the core functionality needed for agent loading
-    
+
     if !ensure_baml_src_exists() {
         return;
     }
@@ -219,7 +228,7 @@ async fn test_runtime_manager_loads_schema() {
             .to_str()
             .expect("Workspace baml_src path should be valid"),
     );
-    
+
     match result {
         Ok(_) => {
             assert!(manager.is_schema_loaded(), "Schema should be loaded");
@@ -238,8 +247,7 @@ async fn test_e2e_agent_runner_load_package() {
     // Create a test agent package
     let package_path = std::env::temp_dir().join("e2e-test-agent-package.tar.gz");
 
-    create_test_agent_package(&package_path)
-        .expect("Failed to create test agent package");
+    create_test_agent_package(&package_path).expect("Failed to create test agent package");
 
     assert!(package_path.exists(), "Test package should exist");
 
@@ -277,8 +285,7 @@ async fn test_e2e_agent_runner_invoke_function() {
     // Create a test agent package
     let package_path = std::env::temp_dir().join("e2e-test-agent-invoke.tar.gz");
 
-    create_test_agent_package(&package_path)
-        .expect("Failed to create test agent package");
+    create_test_agent_package(&package_path).expect("Failed to create test agent package");
 
     // Try to invoke a function (will fail without API key, but should parse correctly)
     let mut cmd = agent_runner_command();
@@ -298,7 +305,7 @@ async fn test_e2e_agent_runner_invoke_function() {
 
     // Even if it fails due to missing API key, the structure should work
     // (i.e., it should load the package and attempt to invoke, not fail on parsing)
-    let is_auth_error = stderr.contains("API key") 
+    let is_auth_error = stderr.contains("API key")
         || stderr.contains("authentication")
         || stderr.contains("401")
         || stdout.contains("error");
@@ -308,8 +315,10 @@ async fn test_e2e_agent_runner_invoke_function() {
         println!("Expected authentication error (no API key provided)");
     } else if output.status.success() {
         // Success: Function was invoked
-        assert!(stdout.contains("{") || stdout.contains("result"), 
-                "Should return JSON result");
+        assert!(
+            stdout.contains("{") || stdout.contains("result"),
+            "Should return JSON result"
+        );
     } else {
         // Other errors might be acceptable if they're not parsing/loading errors
         println!("Function invocation returned non-zero exit code, but may be expected");

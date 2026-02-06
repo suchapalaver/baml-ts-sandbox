@@ -3,9 +3,9 @@
 //! This module provides structured span instrumentation following the OTel guide pattern.
 //! All span names use the `baml_rt.` namespace prefix for low cardinality.
 
-use tracing::Span;
-use std::path::Path;
 use baml_rt_core::correlation::current_correlation_id;
+use std::path::Path;
+use tracing::Span;
 
 // Builder operations
 
@@ -116,10 +116,7 @@ pub fn register_baml_functions(function_count: usize) -> Span {
 /// Parent: load_agent_package
 #[inline]
 pub fn evaluate_agent_code(entry_point: &str) -> Span {
-    tracing::debug_span!(
-        "baml_rt.evaluate_agent_code",
-        entry_point = entry_point,
-    )
+    tracing::debug_span!("baml_rt.evaluate_agent_code", entry_point = entry_point,)
 }
 
 /// Create span for invoking an agent function.
@@ -211,10 +208,7 @@ pub fn a2a_cancel(task_id: &str, correlation_id: &str) -> Span {
 /// Parent: create_js_bridge
 #[inline]
 pub fn register_tool(tool_name: &str) -> Span {
-    tracing::debug_span!(
-        "baml_rt.register_tool",
-        tool = tool_name,
-    )
+    tracing::debug_span!("baml_rt.register_tool", tool = tool_name,)
 }
 
 /// Create span for BAML runtime initialization.

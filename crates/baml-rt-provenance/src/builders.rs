@@ -12,7 +12,11 @@ pub struct EntityBuilder {
 
 impl EntityBuilder {
     pub fn new(id: &str) -> Self {
-        Self { id: id.to_string(), prov_type: None, attributes: HashMap::new() }
+        Self {
+            id: id.to_string(),
+            prov_type: None,
+            attributes: HashMap::new(),
+        }
     }
 
     pub fn type_(mut self, prov_type: &str) -> Self {
@@ -26,7 +30,10 @@ impl EntityBuilder {
     }
 
     pub fn build(self) -> (String, Entity) {
-        let entity = Entity { prov_type: self.prov_type, attributes: self.attributes };
+        let entity = Entity {
+            prov_type: self.prov_type,
+            attributes: self.attributes,
+        };
         (self.id, entity)
     }
 }
@@ -89,7 +96,11 @@ pub struct AgentBuilder {
 
 impl AgentBuilder {
     pub fn new(id: &str) -> Self {
-        Self { id: id.to_string(), prov_type: None, attributes: HashMap::new() }
+        Self {
+            id: id.to_string(),
+            prov_type: None,
+            attributes: HashMap::new(),
+        }
     }
 
     pub fn type_(mut self, prov_type: &str) -> Self {
@@ -103,7 +114,10 @@ impl AgentBuilder {
     }
 
     pub fn build(self) -> (String, Agent) {
-        let agent = Agent { prov_type: self.prov_type, attributes: self.attributes };
+        let agent = Agent {
+            prov_type: self.prov_type,
+            attributes: self.attributes,
+        };
         (self.id, agent)
     }
 }
@@ -114,7 +128,9 @@ pub struct ProvDocumentBuilder {
 
 impl ProvDocumentBuilder {
     pub fn new() -> Self {
-        Self { doc: ProvDocument::new() }
+        Self {
+            doc: ProvDocument::new(),
+        }
     }
 
     pub fn entity<F>(mut self, id: &str, f: F) -> Self
@@ -170,7 +186,12 @@ pub struct UsedBuilder {
 
 impl UsedBuilder {
     fn new(doc_builder: ProvDocumentBuilder, activity: String, entity: String) -> Self {
-        Self { doc_builder, activity, entity, role: None }
+        Self {
+            doc_builder,
+            activity,
+            entity,
+            role: None,
+        }
     }
 
     pub fn role(mut self, role: &str) -> Self {
@@ -180,7 +201,11 @@ impl UsedBuilder {
 
     pub fn build(mut self) -> ProvDocumentBuilder {
         let id = self.doc_builder.doc.blank_node_id("u");
-        let used = Used { activity: self.activity, entity: self.entity, role: self.role };
+        let used = Used {
+            activity: self.activity,
+            entity: self.entity,
+            role: self.role,
+        };
         self.doc_builder.doc.used.insert(id, used);
         self.doc_builder
     }
@@ -195,7 +220,12 @@ pub struct WasGeneratedByBuilder {
 
 impl WasGeneratedByBuilder {
     fn new(doc_builder: ProvDocumentBuilder, entity: String, activity: String) -> Self {
-        Self { doc_builder, entity, activity, time_ms: None }
+        Self {
+            doc_builder,
+            entity,
+            activity,
+            time_ms: None,
+        }
     }
 
     pub fn time_ms(mut self, time_ms: u64) -> Self {
@@ -205,9 +235,15 @@ impl WasGeneratedByBuilder {
 
     pub fn build(mut self) -> ProvDocumentBuilder {
         let id = self.doc_builder.doc.blank_node_id("g");
-        let was_generated_by =
-            WasGeneratedBy { entity: self.entity, activity: self.activity, time_ms: self.time_ms };
-        self.doc_builder.doc.was_generated_by.insert(id, was_generated_by);
+        let was_generated_by = WasGeneratedBy {
+            entity: self.entity,
+            activity: self.activity,
+            time_ms: self.time_ms,
+        };
+        self.doc_builder
+            .doc
+            .was_generated_by
+            .insert(id, was_generated_by);
         self.doc_builder
     }
 }
@@ -221,7 +257,12 @@ pub struct WasAssociatedWithBuilder {
 
 impl WasAssociatedWithBuilder {
     fn new(doc_builder: ProvDocumentBuilder, activity: String, agent: String) -> Self {
-        Self { doc_builder, activity, agent, role: None }
+        Self {
+            doc_builder,
+            activity,
+            agent,
+            role: None,
+        }
     }
 
     pub fn role(mut self, role: &str) -> Self {
@@ -231,9 +272,15 @@ impl WasAssociatedWithBuilder {
 
     pub fn build(mut self) -> ProvDocumentBuilder {
         let id = self.doc_builder.doc.blank_node_id("assoc");
-        let was_associated_with =
-            WasAssociatedWith { activity: self.activity, agent: self.agent, role: self.role };
-        self.doc_builder.doc.was_associated_with.insert(id, was_associated_with);
+        let was_associated_with = WasAssociatedWith {
+            activity: self.activity,
+            agent: self.agent,
+            role: self.role,
+        };
+        self.doc_builder
+            .doc
+            .was_associated_with
+            .insert(id, was_associated_with);
         self.doc_builder
     }
 }

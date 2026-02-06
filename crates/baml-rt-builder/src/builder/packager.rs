@@ -1,13 +1,13 @@
 //! Packager implementation for creating tar.gz agent packages
 
-use baml_rt_core::{BamlRtError, Result};
-use crate::builder::traits::{Packager, FileSystem};
+use crate::builder::traits::{FileSystem, Packager};
 use crate::builder::types::{AgentDir, BuildDir};
+use baml_rt_core::{BamlRtError, Result};
+use flate2::Compression;
+use flate2::write::GzEncoder;
 use std::fs;
 use std::path::Path;
 use tar::{Builder, Header};
-use flate2::write::GzEncoder;
-use flate2::Compression;
 
 /// Standard packager implementation
 pub struct StdPackager<FS> {
@@ -22,7 +22,12 @@ impl<FS: FileSystem> StdPackager<FS> {
 
 #[async_trait::async_trait]
 impl<FS: FileSystem> Packager for StdPackager<FS> {
-    async fn package(&self, agent_dir: &AgentDir, build_dir: &BuildDir, output: &Path) -> Result<()> {
+    async fn package(
+        &self,
+        agent_dir: &AgentDir,
+        build_dir: &BuildDir,
+        output: &Path,
+    ) -> Result<()> {
         if let Some(parent) = output.parent() {
             fs::create_dir_all(parent).map_err(BamlRtError::Io)?;
         }
@@ -36,7 +41,8 @@ impl<FS: FileSystem> Packager for StdPackager<FS> {
         if manifest_path.exists() {
             let content = fs::read_to_string(&manifest_path).map_err(BamlRtError::Io)?;
             let mut header = Header::new_gnu();
-            header.set_path("manifest.json")
+            header
+                .set_path("manifest.json")
                 .map_err(BamlRtError::TarHeaderPath)?;
             header.set_size(content.len() as u64);
             header.set_cksum();
@@ -49,7 +55,8 @@ impl<FS: FileSystem> Packager for StdPackager<FS> {
         if package_json_path.exists() {
             let content = fs::read_to_string(&package_json_path).map_err(BamlRtError::Io)?;
             let mut header = Header::new_gnu();
-            header.set_path("package.json")
+            header
+                .set_path("package.json")
                 .map_err(BamlRtError::TarHeaderPath)?;
             header.set_size(content.len() as u64);
             header.set_cksum();
@@ -81,7 +88,10 @@ fn add_directory_to_tar<FS: FileSystem>(
     _filesystem: &FS,
 ) -> Result<()> {
     // Recursively collect all files in the directory
-    fn collect_all_files(dir: &Path, files: &mut Vec<std::path::PathBuf>) -> std::result::Result<(), std::io::Error> {
+    fn collect_all_files(
+        dir: &Path,
+        files: &mut Vec<std::path::PathBuf>,
+    ) -> std::result::Result<(), std::io::Error> {
         for entry in fs::read_dir(dir)? {
             let entry = entry?;
             let path = entry.path();
@@ -99,14 +109,18 @@ fn add_directory_to_tar<FS: FileSystem>(
 
     for file_path in files {
         let content = fs::read_to_string(&file_path).map_err(BamlRtError::Io)?;
-        let relative_path = file_path.strip_prefix(dir)
-            .map_err(|_| BamlRtError::InvalidArgument(
-                format!("File {} is not under directory {}", file_path.display(), dir.display())
-            ))?;
-        
+        let relative_path = file_path.strip_prefix(dir).map_err(|_| {
+            BamlRtError::InvalidArgument(format!(
+                "File {} is not under directory {}",
+                file_path.display(),
+                dir.display()
+            ))
+        })?;
+
         let tar_path = format!("{}/{}", prefix, relative_path.display());
         let mut header = Header::new_gnu();
-        header.set_path(&tar_path)
+        header
+            .set_path(&tar_path)
             .map_err(BamlRtError::TarHeaderPath)?;
         header.set_size(content.len() as u64);
         header.set_cksum();

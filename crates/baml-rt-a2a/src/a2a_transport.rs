@@ -2,30 +2,32 @@
 
 use crate::a2a;
 use crate::a2a_store::{
-    ProvenanceTaskStore, TaskEventRecorder, TaskRepository, TaskStoreBackend, TaskUpdateQueue,
-    TaskUpdateEvent,
+    ProvenanceTaskStore, TaskEventRecorder, TaskRepository, TaskStoreBackend, TaskUpdateEvent,
+    TaskUpdateQueue,
 };
 use crate::error_classifier::{A2aErrorClassifier, ErrorClassifier};
 use crate::events::{BroadcastEventEmitter, EventEmitter};
 use crate::handlers::{DefaultTaskHandler, TaskHandler};
 use crate::request_router::{MethodBasedRouter, QuickJsInvoker, RequestRouter};
-use crate::result_deduplicator::{DeduplicatingPipeline, HashResultDeduplicator, ResultDeduplicator};
-use crate::result_pipeline::{A2aResultPipeline, ResultStoragePipeline};
 use crate::response::{JsonRpcResponseFormatter, ResponseFormatter};
+use crate::result_deduplicator::{
+    DeduplicatingPipeline, HashResultDeduplicator, ResultDeduplicator,
+};
+use crate::result_pipeline::{A2aResultPipeline, ResultStoragePipeline};
 use crate::stream_normalizer::{A2aStreamNormalizer, StreamNormalizer};
- 
-use baml_rt_quickjs::{BamlRuntimeManager, QuickJSBridge, QuickJSConfig};
-use baml_rt_core::{BamlRtError, Result};
-use baml_rt_core::correlation;
-use baml_rt_core::context;
-use baml_rt_observability::{metrics, spans};
-use baml_rt_tools::{ToolExecutor, ToolMetadata};
-use baml_rt_provenance::{InMemoryProvenanceStore, ProvenanceInterceptor, ProvenanceWriter};
+
 use async_trait::async_trait;
+use baml_rt_core::context;
+use baml_rt_core::correlation;
+use baml_rt_core::{BamlRtError, Result};
+use baml_rt_observability::{metrics, spans};
+use baml_rt_provenance::{InMemoryProvenanceStore, ProvenanceInterceptor, ProvenanceWriter};
+use baml_rt_quickjs::{BamlRuntimeManager, QuickJSBridge, QuickJSConfig};
+use baml_rt_tools::{ToolExecutor, ToolMetadata};
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 use tokio::sync::Mutex;
+use tokio::sync::broadcast;
 
 /// Top-level agent type that owns runtime, JS bridge, and A2A comms.
 #[derive(Clone)]
@@ -227,8 +229,7 @@ impl A2aAgentBuilder {
         let (task_store, provenance_writer) = match (self.task_store, self.provenance_writer) {
             (Some(task_store), provenance_writer) => (task_store, provenance_writer),
             (None, None) => {
-                let writer: Arc<dyn ProvenanceWriter> =
-                    Arc::new(InMemoryProvenanceStore::new());
+                let writer: Arc<dyn ProvenanceWriter> = Arc::new(InMemoryProvenanceStore::new());
                 let store: Arc<dyn TaskStoreBackend> =
                     Arc::new(ProvenanceTaskStore::new(Some(writer.clone())));
                 (store, Some(writer))
@@ -240,7 +241,8 @@ impl A2aAgentBuilder {
             }
         };
 
-        let emitter: Arc<dyn EventEmitter> = Arc::new(BroadcastEventEmitter::new(update_tx.clone()));
+        let emitter: Arc<dyn EventEmitter> =
+            Arc::new(BroadcastEventEmitter::new(update_tx.clone()));
         let result_pipeline: Arc<dyn ResultStoragePipeline> =
             Arc::new(A2aResultPipeline::new(task_store.clone(), emitter.clone()));
         let deduplicator: Arc<dyn ResultDeduplicator> = Arc::new(HashResultDeduplicator::new());
@@ -271,7 +273,9 @@ impl A2aAgentBuilder {
 
         if let Some(writer) = provenance_writer.clone() {
             let runtime_guard = runtime.lock().await;
-            runtime_guard.register_llm_interceptor(ProvenanceInterceptor::new(writer.clone())).await;
+            runtime_guard
+                .register_llm_interceptor(ProvenanceInterceptor::new(writer.clone()))
+                .await;
             runtime_guard
                 .register_tool_interceptor(ProvenanceInterceptor::new(writer))
                 .await;
@@ -330,8 +334,10 @@ impl A2aRequestHandler for A2aAgent {
         let method = parsed_request.method;
         let is_stream = parsed_request.is_stream;
 
-        let request_context_id =
-            parsed_request.context_id.clone().unwrap_or_else(context::generate_context_id);
+        let request_context_id = parsed_request
+            .context_id
+            .clone()
+            .unwrap_or_else(context::generate_context_id);
         let outcome = correlation::with_correlation_id(correlation_id, async move {
             context::with_context_id(request_context_id, async move {
                 self.request_router.route(&parsed_request).await

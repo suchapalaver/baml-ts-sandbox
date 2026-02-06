@@ -1,8 +1,8 @@
 //! Integration tests for direct BAML tool execution (Rust + JS tools).
 
-use test_support::support;
 use baml_rt::A2aAgent;
 use serde_json::json;
+use test_support::support;
 
 #[tokio::test]
 async fn test_direct_tool_execution_rust_and_js() {
@@ -21,7 +21,10 @@ async fn test_direct_tool_execution_rust_and_js() {
         let runtime = agent.runtime();
         let runtime = runtime.lock().await;
         runtime
-            .execute_tool("calculate", json!({"expression": {"left": 6, "operation": "Multiply", "right": 7}}))
+            .execute_tool(
+                "calculate",
+                json!({"expression": {"left": 6, "operation": "Multiply", "right": 7}}),
+            )
             .await
             .expect("execute rust tool")
     };

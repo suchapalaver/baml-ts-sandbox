@@ -3,20 +3,18 @@
 //! Provides production-grade abstractions for building, linting, and packaging
 //! BAML agent applications.
 
-pub mod types;
-pub mod traits;
+pub mod compiler;
 pub mod filesystem;
 pub mod linter;
-pub mod compiler;
 pub mod packager;
 pub mod service;
+pub mod traits;
+pub mod types;
 
-pub use types::{AgentDir, PackagePath, FunctionName, BuildDir};
-pub use traits::{
-    Linter, TypeScriptCompiler, TypeGenerator, FileSystem, Packager
-};
+pub use compiler::{OxcTypeScriptCompiler, RuntimeTypeGenerator};
 pub use filesystem::StdFileSystem;
 pub use linter::OxcLinter;
-pub use compiler::{OxcTypeScriptCompiler, RuntimeTypeGenerator};
 pub use packager::StdPackager;
 pub use service::BuilderService;
+pub use traits::{FileSystem, Linter, Packager, TypeGenerator, TypeScriptCompiler};
+pub use types::{AgentDir, BuildDir, FunctionName, PackagePath};

@@ -37,7 +37,9 @@ impl JsInvoker for QuickJsInvoker {
     async fn invoke_handler(&self, request: &a2a::A2aRequest) -> Result<Value> {
         let js_request = a2a::request_to_js_value(request);
         let mut bridge = self.bridge.lock().await;
-        bridge.invoke_js_function("handle_a2a_request", js_request).await
+        bridge
+            .invoke_js_function("handle_a2a_request", js_request)
+            .await
     }
 
     async fn invoke_stream(&self, request: &a2a::A2aRequest) -> Result<Vec<Value>> {
@@ -105,7 +107,9 @@ impl RequestRouter for MethodBasedRouter {
             a2a::A2aMethod::TasksSubscribe => {
                 let req =
                     serde_json::from_value(request.params.clone()).map_err(BamlRtError::Json)?;
-                self.task_handler.handle_subscribe(req, request.is_stream).await
+                self.task_handler
+                    .handle_subscribe(req, request.is_stream)
+                    .await
             }
             _ => {
                 if request.is_stream {
